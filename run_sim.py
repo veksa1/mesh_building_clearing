@@ -24,7 +24,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation
 
-from swarm_sim.building import BuildingMap, build_small_office
+from swarm_sim.building import BuildingMap, LAYOUT_CHOICES, load_layout
 from swarm_sim.navigation import (
     concat_paths,
     grid_shortest_path,
@@ -38,6 +38,24 @@ from swarm_sim.propagation import field_strength_map
 class FrameState:
     drones_rc: list[tuple[float, float]]
     caption: str
+    layout_name: str
+    queue_rooms: list[int]
+    phase_line: str
+    discovered_line: str
+
+
+def format_side_panel(st: FrameState) -> str:
+    q_fmt = " │ ".join(str(x) for x in st.queue_rooms) if st.queue_rooms else "∅"
+    return (
+        f"Layout: {st.layout_name}\n"
+        f"{'─' * 26}\n\n"
+        "BFS frontier Q\n(head → tail)\n\n"
+        f"   [ {q_fmt} ]\n\n"
+        "Phase\n"
+        f"   {st.phase_line}\n\n"
+        "Discovery trace\n"
+        f"   {st.discovered_line}\n"
+    )
 
 
 def bfs_plan(
@@ -76,6 +94,7 @@ def rooms_root_to_u(parent: dict[int, int | None], root: int, u: int) -> list[in
 def build_timeline(
     building: BuildingMap,
     *,
+    layout_name: str,
     n_drones: int,
     frames_per_edge: int,
     dwell_frames: int,
@@ -104,17 +123,21 @@ def build_timeline(
 
     timeline: list[FrameState] = []
 
-    def caption_idle(q_repr: str, depth: str) -> str:
+    def caption_body(depth: str, discovery_trace: str) -> str:
         return (
             "BFS tree takeover (rooms = vertices)\n"
-            f"Frontier queue Q after enqueue (FIFO snapshot): {q_repr}\n"
             f"{depth}\n"
+            f"Discovery trace: {discovery_trace}\n\n"
             "Drone paths: grid shortest paths on walkable cells (no wall clipping).\n"
-            "Relays hold the backbone to the parent room while the scout opens the next edge.\n"
+            "Relays stay put across openings — only the scout crosses each new edge;\n"
+            "relay spacing refreshes once after each room commits.\n\n"
             "Path loss model (Rep. ITU-R P.2346 eq. (2) style):\n"
             "  L = 20·log10(f_MHz) + N·log10(d_m) − 27.55 + L_f\n"
-            "  L_f ≈ (wall pixel hits along LOS) × L_wall — heuristic grid penetration."
+            "  L_f ≈ (wall pixel hits along LOS) × L_wall — heuristic grid penetration.\n\n"
+            "See side panel for FIFO frontier queue state."
         )
+
+    discovered_msg = "0"
 
     # Idle — relays spaced toward the upper doorway; scout at door staging point.
     relay_pts = sample_polyline(stage_path, n_relays)
@@ -125,17 +148,20 @@ def build_timeline(
         timeline.append(
             FrameState(
                 drones_rc=idle_swarm,
-                caption=caption_idle(str(q0), "Staging at entrance — relays line toward lobby doorway."),
+                caption=caption_body(
+                    "Staging at entrance — relays line toward primary doorway.",
+                    discovered_msg,
+                ),
+                layout_name=layout_name,
+                queue_rooms=list(q0),
+                phase_line="Idle — waiting to expand first frontier.",
+                discovered_line=discovered_msg,
             )
         )
-
-    discovered_msg = f"Discovered (BFS order): [{root}]"
 
     assert len(queue_snapshots) == len(edges)
 
     for (u, w), q_snap in zip(edges, queue_snapshots):
-        backbone_parent = backbone_cells_upto(u)
-        relay_hold = sample_polyline(backbone_parent, n_relays)
         motion_path = edge_paths[(u, w)]
 
         discovered_msg += f" → {w}"
@@ -145,13 +171,15 @@ def build_timeline(
             scout_xy = interpolate_polyline(motion_path, t)
             timeline.append(
                 FrameState(
-                    drones_rc=relay_hold + [scout_xy],
-                    caption=caption_idle(
-                        str(q_snap),
-                        f"Edge ({u}→{w})  |  relays on backbone≤{u}, scout along corridor grid path.",
-                    )
-                    + "\n"
-                    + discovered_msg,
+                    drones_rc=relay_pts + [scout_xy],
+                    caption=caption_body(
+                        f"Edge ({u}→{w}) — relays frozen; scout follows corridor grid path.",
+                        discovered_msg,
+                    ),
+                    layout_name=layout_name,
+                    queue_rooms=list(q_snap),
+                    phase_line=f"Scout moving along tree edge {u} → {w} ({k + 1}/{frames_per_edge})",
+                    discovered_line=discovered_msg,
                 )
             )
 
@@ -164,12 +192,14 @@ def build_timeline(
             timeline.append(
                 FrameState(
                     drones_rc=settled_swarm,
-                    caption=caption_idle(
-                        str(q_snap),
+                    caption=caption_body(
                         f"Committed parent[{w}]={u}; relays redistributed along backbone to room {w}.",
-                    )
-                    + "\n"
-                    + discovered_msg,
+                        discovered_msg,
+                    ),
+                    layout_name=layout_name,
+                    queue_rooms=list(q_snap),
+                    phase_line=f"Settled — relays parked along backbone to room {w}.",
+                    discovered_line=discovered_msg,
                 )
             )
 
@@ -181,14 +211,17 @@ def main() -> int:
         description="BFS swarm takeover simulation with RSSI map.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
+            "Layouts (--layout):\n"
+            "  office   — split-level demo (default)\n"
+            "  corridor — narrow vertical chain R0→R1→R2→R3\n"
+            "  wing     — long upper wing + tucked lobby\n\n"
             "From inside swarm_sim/:\n"
-            "  python run_sim.py\n"
+            "  python run_sim.py --layout corridor\n"
             "From repo root (parent of swarm_sim/):\n"
-            "  python -m swarm_sim\n"
-            "  python -m swarm_sim.run_sim\n"
+            "  python -m swarm_sim --layout wing\n"
             "Examples:\n"
-            '  python run_sim.py --save-png preview.png\n'
-            '  python -m swarm_sim --save-gif takeover.gif --dwell 4 --interval-ms 70\n'
+            '  python run_sim.py --save-png preview.png --layout office\n'
+            '  python -m swarm_sim --save-gif out.gif --layout corridor --dwell 4\n'
         ),
     )
     parser.add_argument("--cell-m", type=float, default=0.22, help="Meters per raster cell edge.")
@@ -201,13 +234,20 @@ def main() -> int:
     parser.add_argument("--frames-per-edge", type=int, default=32)
     parser.add_argument("--dwell", type=int, default=10)
     parser.add_argument("--interval-ms", type=int, default=90)
+    parser.add_argument(
+        "--layout",
+        choices=list(LAYOUT_CHOICES),
+        default="office",
+        help="Floor-plan preset: office | corridor | wing.",
+    )
     parser.add_argument("--save-gif", type=str, default="", help="Optional path to save animated GIF.")
     parser.add_argument("--save-png", type=str, default="", help="Save first frame snapshot to PNG and exit.")
     args = parser.parse_args()
 
-    building = build_small_office()
+    building = load_layout(args.layout)
     timeline, parent, edges = build_timeline(
         building,
+        layout_name=args.layout,
         n_drones=args.n_drones,
         frames_per_edge=args.frames_per_edge,
         dwell_frames=args.dwell,
@@ -229,7 +269,16 @@ def main() -> int:
     vmin = np.percentile(first_rss[np.isfinite(first_rss)], 5) - 5
     vmax = np.percentile(first_rss[np.isfinite(first_rss)], 95) + 8
 
-    fig, ax = plt.subplots(figsize=(11, 7))
+    fig = plt.figure(figsize=(14.5, 7.6))
+    gs = fig.add_gridspec(1, 2, width_ratios=[3.2, 0.95], wspace=0.07)
+    ax = fig.add_subplot(gs[0, 0])
+    ax_panel = fig.add_subplot(gs[0, 1])
+    ax_panel.set_facecolor("#f4f4f4")
+    ax_panel.grid(False)
+    ax_panel.set_xticks([])
+    ax_panel.set_yticks([])
+    ax_panel.set_title("Planner")
+
     extent_m = [0.0, w * args.cell_m, h * args.cell_m, 0.0]
     im = ax.imshow(
         first_rss,
@@ -241,7 +290,7 @@ def main() -> int:
         interpolation="nearest",
         aspect="equal",
     )
-    cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03)
     cbar.set_label("Received power (dBm), max over airborne relays")
 
     wy, wx = np.where(wall)
@@ -268,11 +317,25 @@ def main() -> int:
         zorder=5,
     )
 
-    txt = fig.text(0.02, 0.02, timeline[0].caption, fontsize=10, family="monospace", va="bottom")
+    fig.subplots_adjust(left=0.06, right=0.98, bottom=0.21, top=0.90)
+
+    txt = fig.text(0.06, 0.035, timeline[0].caption, fontsize=9.5, family="monospace", va="bottom")
+
+    panel_txt = ax_panel.text(
+        0.05,
+        0.97,
+        format_side_panel(timeline[0]),
+        transform=ax_panel.transAxes,
+        fontsize=10,
+        family="monospace",
+        va="top",
+        ha="left",
+        linespacing=1.35,
+    )
 
     ax.set_xlabel("x (m)")
     ax.set_ylabel("y (m)")
-    ax.set_title("Breadth-first spanning-tree takeover + tactical RSSI map")
+    ax.set_title(f"BFS takeover + RSSI — layout “{args.layout}”")
 
     def update(frame_idx: int):
         state = timeline[frame_idx]
@@ -290,7 +353,8 @@ def main() -> int:
         pts = np.asarray(state.drones_rc)
         sc.set_offsets(np.c_[pts[:, 1] * args.cell_m, pts[:, 0] * args.cell_m])
         txt.set_text(state.caption)
-        return im, sc, txt
+        panel_txt.set_text(format_side_panel(state))
+        return im, sc, txt, panel_txt
 
     if args.save_png:
         fig.savefig(args.save_png, dpi=160, bbox_inches="tight")
