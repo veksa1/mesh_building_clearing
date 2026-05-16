@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
 from swarm_sim.agent import DroneAgent, StepIntent
 from swarm_sim.building import BuildingMap
@@ -40,6 +41,7 @@ class LayoutBFSDrone(DroneAgent):
         vision_radius: int | None = None,
         visit_history_len: int = 48,
         fleet_n: int = 1,
+        mesh_activity_sink: Callable[[str], None] | None = None,
     ) -> None:
         super().__init__(
             uid=uid,
@@ -51,6 +53,7 @@ class LayoutBFSDrone(DroneAgent):
             vision_radius=vision_radius,
             visit_history_len=visit_history_len,
             fleet_n=fleet_n,
+            mesh_activity_sink=mesh_activity_sink,
         )
         self._bm = building
         wall = building.wall

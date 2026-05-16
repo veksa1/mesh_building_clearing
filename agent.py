@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import zlib
@@ -10,6 +11,7 @@ import zlib
 import numpy as np
 
 from .environment import CellReading, Environment
+from .mesh_activity_log import format_mesh_activity_adopt, format_mesh_activity_tx
 from .perception import VisualDetection
 from .radio import MsgKind, Packet
 
@@ -45,6 +47,7 @@ class DroneAgent:
         vision_radius: int | None = None,
         visit_history_len: int = 48,
         fleet_n: int = 1,
+        mesh_activity_sink: Callable[[str], None] | None = None,
     ) -> None:
         self.uid = uid
         self.start_r = int(start_rc[0])
@@ -56,6 +59,8 @@ class DroneAgent:
         self.merge_interval = merge_interval
         self.token_interval = token_interval
         self.fleet_n = max(1, int(fleet_n))
+
+        self.mesh_activity_sink = mesh_activity_sink
 
         self.known_wall: set[tuple[int, int]] = set()
         self.known_free: set[tuple[int, int]] = set()
@@ -335,7 +340,10 @@ class DroneAgent:
 
     def drain_inbox(self, tick: int) -> None:
         """Apply gossip merges from received packets."""
+        sink = self.mesh_activity_sink
         for pkt, _rssi in self.inbox:
+            if sink is not None:
+                sink(format_mesh_activity_adopt(self.uid, pkt, tick))
             if pkt.kind == MsgKind.BEACON:
                 rr = pkt.payload.get("r")
                 cc = pkt.payload.get("c")
@@ -400,6 +408,11 @@ class DroneAgent:
 
     def on_receive(self, packet: Packet, rssi_dbm: float) -> None:
         self.inbox.append((packet, rssi_dbm))
+
+    def emit_mesh_tx_activity(self, pkt: Packet, tick: int) -> None:
+        sink = self.mesh_activity_sink
+        if sink is not None:
+            sink(format_mesh_activity_tx(self.uid, pkt, tick))
 
     def decide_move(
         self,

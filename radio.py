@@ -8,6 +8,7 @@ from enum import Enum
 import numpy as np
 
 from .propagation import received_power_dbm
+from .viz_mesh_log import drone_gate_label, rf_destination_label
 
 
 class MsgKind(str, Enum):
@@ -43,6 +44,16 @@ class CommEvent:
         rs = f"{self.rssi_dbm:.1f}" if self.rssi_dbm is not None else "—"
         return (
             f"t={self.tick:04d}  {self.msg_type:<14}  {self.src_id}→{self.dst_id}  "
+            f"RSSI={rs} dBm  [{self.outcome}] {self.detail}"
+        )
+
+    def format_rf_hud_line(self) -> str:
+        """Bracket-style line for decentralized matplotlib RF panel."""
+        rs = f"{self.rssi_dbm:.1f}" if self.rssi_dbm is not None else "—"
+        sd = drone_gate_label(int(self.src_id))
+        dd = rf_destination_label(self.dst_id)
+        return (
+            f"t={self.tick:04d}  [RF]  [{sd}]  {self.msg_type:<14}  {sd}→{dd}  "
             f"RSSI={rs} dBm  [{self.outcome}] {self.detail}"
         )
 
