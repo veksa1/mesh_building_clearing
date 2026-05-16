@@ -247,7 +247,7 @@ def _run_local_sense(
         rf_log_cap=24,
         seed=int(seed),
         explorer_phase_ticks=explorer_phase_ticks,
-        decentralized_policy="local_sense",
+        decentralized_policy="layout_bfs",
         target_rc=target_rc,
     )
 
@@ -346,7 +346,7 @@ def build_bundle_from_raster(
             "ticks": len(timeline),
             "nDrones": n_drones,
             "seed": seed,
-            "policy": "local_sense",
+            "policy": "layout_bfs",
             "commBackend": backend_used,
         },
         "rasterized": {
