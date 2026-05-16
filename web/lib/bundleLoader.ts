@@ -228,7 +228,7 @@ export async function fetchLiveBundle(
 
   const body = JSON.stringify({
     floorplan,
-    ticks: opts.ticks ?? 200,
+    ticks: opts.ticks ?? 400,
     nDrones: opts.nDrones ?? 3,
     seed: opts.seed ?? 0,
     explorerPhaseTicks: opts.explorerPhaseTicks ?? 25,
