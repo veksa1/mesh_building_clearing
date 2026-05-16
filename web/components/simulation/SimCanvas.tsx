@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo, useRef } from 'react';
 import type { CompiledSim, SimParams } from '@/types';
-import { CANVAS_H, CANVAS_W, CELL_PX, MESH_LINK_THRESHOLD_DBM } from '@/constants';
+import { CANVAS_H, CANVAS_W, CELL_PX } from '@/constants';
 import { fieldStrengthMap } from '@/lib/propagation/fieldStrengthMap';
-import { pathLossDb } from '@/lib/propagation/pathLoss';
 import { rssiToRGB } from '@/lib/colormap/inferno';
+import { msgKindColor, outcomeAlpha } from '@/lib/radio';
 
 export function SimCanvas({
   compiled,
@@ -76,24 +76,25 @@ export function SimCanvas({
     // 3. Wall overlay.
     ctx.drawImage(wallBitmap, 0, 0);
 
-    // 4. Mesh links between drones (faint cyan).
+    // 4. Mesh comm links — driven by FrameState.commLinks (BEACON / TOPOLOGY_MERGE / TOKEN).
     const drones = frame.dronesRC;
-    ctx.strokeStyle = 'rgba(0,255,255,0.25)';
-    ctx.lineWidth = 1;
-    for (let i = 0; i < drones.length; i++) {
-      for (let j = i + 1; j < drones.length; j++) {
-        const dr = drones[i].row - drones[j].row;
-        const dc = drones[i].col - drones[j].col;
-        const distM = Math.hypot(dr * rasterized.cellSizeM, dc * rasterized.cellSizeM);
-        const rssi = params.txPowerDbm - pathLossDb(distM, params.freqMhz, params.distanceExponent, 0);
-        if (rssi > MESH_LINK_THRESHOLD_DBM) {
-          ctx.beginPath();
-          ctx.moveTo(drones[i].col * CELL_PX, drones[i].row * CELL_PX);
-          ctx.lineTo(drones[j].col * CELL_PX, drones[j].row * CELL_PX);
-          ctx.stroke();
-        }
-      }
+    for (const link of frame.commLinks) {
+      const fade = Math.max(link.ticksLeft / link.ttlTicks, 0.06);
+      const alpha = outcomeAlpha(link.outcome) * fade;
+      const color = msgKindColor(link.msgType);
+      // Convert rgba: parse hex.
+      const r = parseInt(color.slice(1, 3), 16);
+      const g = parseInt(color.slice(3, 5), 16);
+      const b = parseInt(color.slice(5, 7), 16);
+      ctx.strokeStyle = `rgba(${r},${g},${b},${alpha.toFixed(3)})`;
+      ctx.lineWidth = link.outcome === 'delivered' ? 1.6 : 1;
+      ctx.setLineDash(link.outcome === 'below_threshold' ? [4, 3] : []);
+      ctx.beginPath();
+      ctx.moveTo(link.c0 * CELL_PX, link.r0 * CELL_PX);
+      ctx.lineTo(link.c1 * CELL_PX, link.r1 * CELL_PX);
+      ctx.stroke();
     }
+    ctx.setLineDash([]);
 
     // 5. Entrance marker.
     const entrance = (() => {
@@ -135,16 +136,23 @@ export function SimCanvas({
 
     // 7. Drones.
     for (let i = 0; i < drones.length; i++) {
-      const isScout = i === drones.length - 1;
-      const cx = drones[i].col * CELL_PX;
-      const cy = drones[i].row * CELL_PX;
+      const isScout = frame.droneRoles[i] === 'scout';
+      // Cell-center pixel coordinates.
+      const cx = (drones[i].col + 0.5) * CELL_PX;
+      const cy = (drones[i].row + 0.5) * CELL_PX;
       ctx.fillStyle = isScout ? '#00ffff' : '#ffffff';
       ctx.strokeStyle = '#000';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.arc(cx, cy, isScout ? 6 : 5, 0, Math.PI * 2);
+      ctx.arc(cx, cy, isScout ? 7 : 5, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
+      // UID label
+      ctx.fillStyle = '#000';
+      ctx.font = '8px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(i), cx, cy);
     }
   }, [frame, compiled, params, wallBitmap]);
 

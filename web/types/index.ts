@@ -72,14 +72,45 @@ export type DroneRC = { row: number; col: number };
 
 export type SimPhase = 'staging' | 'traversing' | 'settled' | 'neutralised';
 
+export type MsgKind = 'BEACON' | 'TOPOLOGY_MERGE' | 'TOKEN';
+export type MsgOutcome = 'delivered' | 'below_threshold' | 'tx';
+
+export interface CommLink {
+  ticksLeft: number;
+  ttlTicks: number;
+  r0: number;
+  c0: number;
+  r1: number;
+  c1: number;
+  msgType: MsgKind;
+  outcome: MsgOutcome;
+}
+
+export interface RFEvent {
+  tick: number;
+  msgType: MsgKind;
+  srcId: number;
+  dstId: number | 'broadcast';
+  rssiDbm: number | null;
+  outcome: MsgOutcome;
+  seq: number;
+}
+
+export type DroneRole = 'scout' | 'relay';
+
 export interface FrameState {
   dronesRC: DroneRC[];
+  droneRoles: DroneRole[];
   phase: SimPhase;
   caption: string;
   queueRooms: number[];
   phaseLine: string;
   discoveredLine: string;
   committedBfsEdges: [number, number][];
+  commLinks: CommLink[];
+  rfLogTail: string[];
+  tick: number;
+  activeEdge: [number, number] | null;
 }
 
 export interface SimParams {

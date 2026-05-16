@@ -2,7 +2,7 @@ import type { CompiledSim, FloorplanData, SimParams } from '@/types';
 import { rasterize } from './rasterize';
 import { labelRegions } from './algorithms/floodFill';
 import { buildRoomGraph } from './algorithms/roomGraph';
-import { buildTimeline } from './algorithms/buildTimeline';
+import { runSwarm } from './algorithms/runSwarm';
 import { fieldStrengthMap } from './propagation/fieldStrengthMap';
 
 export interface CompileResult {
@@ -70,7 +70,7 @@ export function compile(floorplan: FloorplanData, params: SimParams): CompileRes
   // If they're in the same room, no BFS needed but we still simulate a stage sequence.
   // Allow it — buildTimeline handles single-room case via stage frames only.
 
-  const timeline = buildTimeline(roomGraph, rasterized, params, labels);
+  const { timeline } = runSwarm(roomGraph, rasterized, params, labels);
 
   if (timeline.length === 0) {
     return { ok: false, error: 'Empty simulation timeline.' };

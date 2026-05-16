@@ -5,6 +5,7 @@ import type { FrameState, RoomGraph } from '@/types';
 import { RoomGraphMini } from './RoomGraphMini';
 import { BfsQueueDisplay } from './BfsQueueDisplay';
 import { DecisionLog } from './DecisionLog';
+import { CommsLog } from './CommsLog';
 
 export function ThinkingPanel({
   frame,
@@ -34,6 +35,7 @@ export function ThinkingPanel({
         discoveredRooms={discoveredRooms}
       />
       <BfsQueueDisplay queue={frame.queueRooms} />
+      <CommsLog rfLogTail={frame.rfLogTail} />
       <DecisionLog
         phaseLine={frame.phaseLine}
         discoveredLine={frame.discoveredLine}

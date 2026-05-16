@@ -31,3 +31,20 @@ console.log('phase counts:', phases);
 
 const neutralFrame = compiled.timeline.find((f) => f.phase === 'neutralised');
 console.log('neutralised reached:', neutralFrame ? 'yes' : 'no');
+
+// Inspect comm events
+const sample = compiled.timeline[20];
+console.log('frame 20 tick:', sample.tick);
+console.log('frame 20 drones:', sample.dronesRC.map((d) => `(${d.row},${d.col})`).join(' '));
+console.log('frame 20 commLinks:', sample.commLinks.length);
+console.log('frame 20 rfLogTail (last 3):');
+for (const line of sample.rfLogTail.slice(-3)) console.log('  ', line);
+
+let totalLinks = 0;
+let maxLinks = 0;
+for (const f of compiled.timeline) {
+  totalLinks += f.commLinks.length;
+  if (f.commLinks.length > maxLinks) maxLinks = f.commLinks.length;
+}
+console.log('avg commLinks/frame:', (totalLinks / compiled.timeline.length).toFixed(1));
+console.log('max commLinks in a frame:', maxLinks);
