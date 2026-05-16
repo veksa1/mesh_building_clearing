@@ -229,7 +229,7 @@ export async function fetchLiveBundle(
   const body = JSON.stringify({
     floorplan,
     ticks: opts.ticks ?? 200,
-    nDrones: opts.nDrones ?? 5,
+    nDrones: opts.nDrones ?? 3,
     seed: opts.seed ?? 0,
     explorerPhaseTicks: opts.explorerPhaseTicks ?? 25,
     // Backend left to the server default (SIM_COMM_BACKEND, normally "udp").

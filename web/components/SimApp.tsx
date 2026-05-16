@@ -27,7 +27,6 @@ const initialState: AppState = {
   currentFrame: 0,
   isPlaying: false,
   compilationError: null,
-  viewMode: 'drone',
 };
 
 function appReducer(state: AppState, action: AppAction): AppState {
@@ -69,6 +68,8 @@ function appReducer(state: AppState, action: AppAction): AppState {
         floorplan: { gridRows: 60, gridCols: 80, walls: [], doors: [], entrance: null, target: null },
         editor: { ...state.editor, pendingWallStart: null },
       };
+    case 'SET_N_DRONES':
+      return { ...state, simParams: { ...state.simParams, nDrones: action.value } };
     case 'RUN_SIMULATION':
       return { ...state, mode: 'compiling', compilationError: null };
     case 'COMPILATION_DONE':
@@ -105,10 +106,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
         ...initialState,
         floorplan: state.floorplan,
         editor: { ...initialState.editor, selectedMaterial: state.editor.selectedMaterial },
-        viewMode: state.viewMode,
       };
-    case 'SET_VIEW_MODE':
-      return { ...state, viewMode: action.viewMode };
     default:
       return state;
   }
@@ -123,7 +121,10 @@ export function SimApp() {
     let cancelled = false;
     (async () => {
       try {
-        const result = await compile(state.floorplan, { signal: controller.signal });
+        const result = await compile(state.floorplan, {
+          signal: controller.signal,
+          nDrones: state.simParams.nDrones,
+        });
         if (cancelled) return;
         if (result.ok) {
           dispatch({ type: 'COMPILATION_DONE', result: result.compiled });
@@ -143,7 +144,7 @@ export function SimApp() {
       cancelled = true;
       controller.abort();
     };
-  }, [state.mode, state.floorplan]);
+  }, [state.mode, state.floorplan, state.simParams.nDrones]);
 
   const liveSimUrl = process.env.NEXT_PUBLIC_SIM_EXPORT_URL?.trim();
 
@@ -177,12 +178,7 @@ export function SimApp() {
           </div>
         )}
         {(state.mode === 'simulating' || state.mode === 'finished') && state.compiled && (
-          <SimCanvas
-            compiled={state.compiled}
-            params={state.simParams}
-            currentFrame={state.currentFrame}
-            viewMode={state.viewMode}
-          />
+          <SimCanvas compiled={state.compiled} params={state.simParams} currentFrame={state.currentFrame} />
         )}
         {isNeutralised && <NeutralisedOverlay visible={true} />}
       </main>
@@ -195,8 +191,6 @@ export function SimApp() {
               frame={currentFrameState}
               roomGraph={state.compiled.roomGraph}
               currentFrame={state.currentFrame}
-              viewMode={state.viewMode}
-              setViewMode={(viewMode) => dispatch({ type: 'SET_VIEW_MODE', viewMode })}
             />
           </div>
         </aside>

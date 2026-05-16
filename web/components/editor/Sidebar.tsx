@@ -69,6 +69,23 @@ export function Sidebar({ state, dispatch }: { state: AppState; dispatch: Dispat
         </div>
       </div>
 
+      <div>
+        <div className="mb-2 text-white/60">DRONES</div>
+        <input
+          type="number"
+          min={1}
+          max={32}
+          value={state.simParams.nDrones}
+          onChange={(e) => {
+            const n = parseInt(e.target.value, 10);
+            if (Number.isFinite(n)) {
+              dispatch({ type: 'SET_N_DRONES', value: Math.max(1, Math.min(32, n)) });
+            }
+          }}
+          className="w-full border border-white/40 bg-black px-2 py-1.5 text-white tracking-wider focus:outline-none focus:border-white"
+        />
+      </div>
+
       <button
         onClick={() => dispatch({ type: 'CLEAR_FLOORPLAN' })}
         className="border border-white/40 px-2 py-1.5 text-left text-white/60 hover:border-white hover:text-white"

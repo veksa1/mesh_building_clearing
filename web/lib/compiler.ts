@@ -19,7 +19,7 @@ export interface CompileError {
 // (static mode, `npm run sim:export`).
 export async function compile(
   floorplan: FloorplanData,
-  opts: { signal?: AbortSignal } = {},
+  opts: { signal?: AbortSignal; nDrones?: number } = {},
 ): Promise<CompileResult | CompileError> {
   if (!floorplan.entrance) return { ok: false, error: 'Set entrance point first.' };
   if (!floorplan.target) return { ok: false, error: 'Set target point first.' };
@@ -40,7 +40,7 @@ export async function compile(
   let source: 'live' | 'static';
   try {
     if (liveUrl) {
-      compiled = await fetchLiveBundle(liveUrl, floorplan, {}, opts.signal);
+      compiled = await fetchLiveBundle(liveUrl, floorplan, { nDrones: opts.nDrones }, opts.signal);
       source = 'live';
     } else {
       compiled = await loadDefaultBundle();

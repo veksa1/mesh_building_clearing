@@ -72,8 +72,6 @@ export type DroneRC = { row: number; col: number };
 
 export type SimPhase = 'staging' | 'traversing' | 'settled' | 'neutralised' | 'exploring';
 
-export type ViewMode = 'drone' | 'oracle';
-
 export type MsgKind = 'BEACON' | 'TOPOLOGY_MERGE' | 'TOKEN';
 export type MsgOutcome = 'delivered' | 'below_threshold' | 'tx';
 
@@ -117,8 +115,8 @@ export interface TargetWitness {
   confidence: number;
 }
 
-// Oracle-only ground-truth view that lives alongside the per-tick frame.
-// Agents do not see this — it is solely for the Drone vs Oracle toggle.
+// Oracle-only ground truth that lives alongside the per-tick frame.
+// Agents do not see this — it is solely for browser-side oracle visualization.
 export interface OracleFrameOverlay {
   roomsDiscovered: number[];
   queueRooms: number[];
@@ -189,14 +187,14 @@ export type AppAction =
   | { type: 'SET_HOVERED'; cell: GridPoint | null }
   | { type: 'SET_PENDING_WALL_START'; cell: GridPoint | null }
   | { type: 'CLEAR_FLOORPLAN' }
+  | { type: 'SET_N_DRONES'; value: number }
   | { type: 'RUN_SIMULATION' }
   | { type: 'COMPILATION_DONE'; result: CompiledSim }
   | { type: 'COMPILATION_FAILED'; error: string }
   | { type: 'TICK_FRAME' }
   | { type: 'SEEK_FRAME'; frame: number }
   | { type: 'TOGGLE_PLAY' }
-  | { type: 'RESET' }
-  | { type: 'SET_VIEW_MODE'; viewMode: ViewMode };
+  | { type: 'RESET' };
 
 export interface AppState {
   mode: AppMode;
@@ -207,7 +205,6 @@ export interface AppState {
   currentFrame: number;
   isPlaying: boolean;
   compilationError: string | null;
-  viewMode: ViewMode;
 }
 
 export interface RSSIRequest {
