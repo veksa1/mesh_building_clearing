@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-
-from matplotlib.axes import Axes
+from typing import TYPE_CHECKING
 
 from .radio import CommEvent
+
+if TYPE_CHECKING:
+    from matplotlib.axes import Axes
 
 DEFAULT_OVERLAY_TTL = 14
 

@@ -45,6 +45,29 @@ a presentation choice and never feeds back into agent decisions:
 | Drone  | Fog mask of cells the swarm has actually observed; CV detection bearings; lead explorer's frontier-BFS belief tree; target marker hidden until first TARGET detection. |
 | Oracle | Full floorplan; ground-truth room graph with discovery order; BFS queue snapshot; target visible. Useful for explaining what mesh + CV bought you. |
 
+## Live simulation API (optional)
+
+The renderer can either replay a prebuilt bundle (default) or POST the editor
+floorplan to a Python HTTP service and replay whatever comes back. The contract
+is identical — the API returns the exact same `SimulationBundle` JSON that
+`npm run sim:export` writes — so `compile()` swaps the two transparently:
+
+| `NEXT_PUBLIC_SIM_EXPORT_URL` | Run button behavior |
+|------------------------------|---------------------|
+| Unset / empty | `fetch('/sim/default.bundle.json')`; grid must match the editor. |
+| Set, e.g. `https://api.example.com/export` | `POST { floorplan, ticks, nDrones, seed }`; the API runs `export_bundle_from_dict` and returns the bundle. |
+
+Set the URL (and an optional bearer token) in `.env.local` for `npm run dev` or
+in Vercel project env vars for production:
+
+```
+NEXT_PUBLIC_SIM_EXPORT_URL=https://api.example.com/export
+# Optional — only set if the API requires Authorization: Bearer <token>
+NEXT_PUBLIC_SIM_EXPORT_TOKEN=...
+```
+
+The backend lives at [`../api/`](../api/) and is documented in [`../api/README.md`](../api/README.md).
+
 ## Bundle schema
 
 Frame fields the renderer understands (see `lib/bundleLoader.ts` and

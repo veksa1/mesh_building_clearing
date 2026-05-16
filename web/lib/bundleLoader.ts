@@ -207,3 +207,57 @@ export async function loadDefaultBundle(): Promise<LoadedSim> {
   }
   return adoptBundle(raw);
 }
+
+export interface LiveExportOptions {
+  ticks?: number;
+  nDrones?: number;
+  seed?: number;
+  explorerPhaseTicks?: number | null;
+  params?: Record<string, number>;
+}
+
+export async function fetchLiveBundle(
+  url: string,
+  floorplan: unknown,
+  opts: LiveExportOptions = {},
+  signal?: AbortSignal,
+): Promise<LoadedSim> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = process.env.NEXT_PUBLIC_SIM_EXPORT_TOKEN;
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const body = JSON.stringify({
+    floorplan,
+    ticks: opts.ticks ?? 1500,
+    nDrones: opts.nDrones ?? 7,
+    seed: opts.seed ?? 0,
+    explorerPhaseTicks: opts.explorerPhaseTicks ?? 25,
+    ...(opts.params ? { params: opts.params } : {}),
+  });
+
+  let res: Response;
+  try {
+    res = await fetch(url, { method: 'POST', headers, body, signal, cache: 'no-store' });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Cannot reach simulation API at ${url}: ${msg}`);
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    let detail = text;
+    try {
+      const parsed = JSON.parse(text);
+      detail = typeof parsed?.detail === 'string' ? parsed.detail : text;
+    } catch {
+      // text isn't JSON; use as-is
+    }
+    throw new Error(
+      `Simulation API ${url} returned ${res.status}${detail ? `: ${detail}` : ''}`,
+    );
+  }
+  const raw = (await res.json()) as RawBundle;
+  if (raw.schemaVersion !== 1) {
+    throw new Error(`Unsupported bundle schemaVersion ${raw.schemaVersion}; expected 1.`);
+  }
+  return adoptBundle(raw);
+}

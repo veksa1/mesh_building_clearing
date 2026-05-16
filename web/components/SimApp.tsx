@@ -117,13 +117,13 @@ function appReducer(state: AppState, action: AppAction): AppState {
 export function SimApp() {
   const [state, dispatch] = useReducer(appReducer, initialState);
 
-  // Trigger compile when entering 'compiling' mode.
   useEffect(() => {
     if (state.mode !== 'compiling') return;
+    const controller = new AbortController();
     let cancelled = false;
     (async () => {
       try {
-        const result = await compile(state.floorplan);
+        const result = await compile(state.floorplan, { signal: controller.signal });
         if (cancelled) return;
         if (result.ok) {
           dispatch({ type: 'COMPILATION_DONE', result: result.compiled });
@@ -141,8 +141,11 @@ export function SimApp() {
     })();
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [state.mode, state.floorplan]);
+
+  const liveSimUrl = process.env.NEXT_PUBLIC_SIM_EXPORT_URL?.trim();
 
   useAnimationLoop(state.isPlaying, () => dispatch({ type: 'TICK_FRAME' }));
 
@@ -160,8 +163,17 @@ export function SimApp() {
       <main className="flex-1 flex flex-col items-center justify-center p-4 relative">
         {state.mode === 'editing' && <EditorCanvas state={state} dispatch={dispatch} />}
         {state.mode === 'compiling' && (
-          <div className="text-white/70 text-sm uppercase tracking-widest">
-            Compiling Mesh Strategy...
+          <div className="text-white/70 text-sm uppercase tracking-widest text-center">
+            {liveSimUrl ? (
+              <>
+                Running simulation on remote API…
+                <div className="mt-2 text-xs text-white/40 normal-case tracking-normal">
+                  This may take 30–60 seconds.
+                </div>
+              </>
+            ) : (
+              <>Compiling Mesh Strategy...</>
+            )}
           </div>
         )}
         {(state.mode === 'simulating' || state.mode === 'finished') && state.compiled && (

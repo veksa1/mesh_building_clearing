@@ -1,0 +1,9 @@
+**/__pycache__
+**/*.pyc
+.git
+.gitignore
+web/node_modules
+web/.next
+web/out
+web/public/sim
+floorplans

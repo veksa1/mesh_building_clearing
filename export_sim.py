@@ -37,6 +37,7 @@ if __package__ in (None, ""):
         FloorplanRaster,
         building_from_raster,
         load_floorplan,
+        rasterize_floorplan,
     )
     from radio import RadioConfig  # type: ignore
     from sim_kernel import DecentralizedFrame, run_decentralized  # type: ignore
@@ -46,6 +47,7 @@ else:
         FloorplanRaster,
         building_from_raster,
         load_floorplan,
+        rasterize_floorplan,
     )
     from .radio import RadioConfig
     from .sim_kernel import DecentralizedFrame, run_decentralized
@@ -210,9 +212,8 @@ def _serialize_frame(
     }
 
 
-def export_bundle(
-    floorplan_path: pathlib.Path,
-    output_path: pathlib.Path,
+def build_bundle_from_raster(
+    raster: FloorplanRaster,
     *,
     ticks: int,
     n_drones: int,
@@ -222,7 +223,7 @@ def export_bundle(
     overlay_ttl: int = 4,
     explorer_phase_ticks: int | None = None,
 ) -> dict[str, Any]:
-    raster = load_floorplan(floorplan_path)
+    """Run the local-sense kernel and serialize the bundle dict (no disk I/O)."""
     building = building_from_raster(raster)
 
     radio_cfg = RadioConfig(
@@ -307,7 +308,57 @@ def export_bundle(
         "target": {"row": int(raster.target_rc[0]), "col": int(raster.target_rc[1])},
         "timeline": timeline,
     }
+    return bundle
 
+
+def export_bundle_from_dict(
+    floorplan: dict[str, Any],
+    *,
+    ticks: int,
+    n_drones: int,
+    seed: int,
+    params: dict[str, float],
+    overlay_ttl: int = 4,
+    explorer_phase_ticks: int | None = None,
+) -> dict[str, Any]:
+    """Rasterize an in-memory floorplan dict and return the bundle dict.
+
+    HTTP-friendly entry point: matches the contract the FastAPI service exposes.
+    """
+    raster = rasterize_floorplan(floorplan)
+    return build_bundle_from_raster(
+        raster,
+        ticks=ticks,
+        n_drones=n_drones,
+        seed=seed,
+        params=params,
+        overlay_ttl=overlay_ttl,
+        explorer_phase_ticks=explorer_phase_ticks,
+    )
+
+
+def export_bundle(
+    floorplan_path: pathlib.Path,
+    output_path: pathlib.Path,
+    *,
+    ticks: int,
+    n_drones: int,
+    seed: int,
+    params: dict[str, float],
+    overlay_ttl: int = 4,
+    explorer_phase_ticks: int | None = None,
+) -> dict[str, Any]:
+    """CLI wrapper: load floorplan JSON from disk, build bundle, write JSON to disk."""
+    raster = load_floorplan(floorplan_path)
+    bundle = build_bundle_from_raster(
+        raster,
+        ticks=ticks,
+        n_drones=n_drones,
+        seed=seed,
+        params=params,
+        overlay_ttl=overlay_ttl,
+        explorer_phase_ticks=explorer_phase_ticks,
+    )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(bundle, separators=(",", ":")), encoding="utf-8")
     return bundle
