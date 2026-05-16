@@ -519,20 +519,7 @@ def run_decentralized(
             for a in agents:
                 readings = env.sense_disc(a.r, a.c, a.perception_radius)
                 a.absorb_readings(readings)
-                if target_witness is None:
-                    tgt_det = env.detect_target(a.r, a.c, radius=a.vision_radius, rng=None)
-                    if tgt_det is not None:
-                        target_witness = (
-                            int(a.uid),
-                            int(tgt_det.anchor_r),
-                            int(tgt_det.anchor_c),
-                            float(tgt_det.confidence),
-                        )
-                        neutralised_phase_ticks_left = neutralised_dwell_ticks
-                if neutralised_phase_ticks_left > 0:
-                    intents[a.uid] = (a.r, a.c)
-                else:
-                    intents[a.uid] = a.decide_move(env, rng, tick=tick).target_rc
+                intents[a.uid] = a.decide_move(env, rng, tick=tick).target_rc
             _layout_relieve_scout_head(agents, intents, env, scout_uid)
         else:
             for a in agents:
