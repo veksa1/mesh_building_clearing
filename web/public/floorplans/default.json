@@ -1,0 +1,22 @@
+{
+  "name": "default-office",
+  "gridRows": 60,
+  "gridCols": 80,
+  "cellSizeM": 0.22,
+  "walls": [
+    { "id": "w_top",     "start": { "row": 8,  "col": 10 }, "end": { "row": 8,  "col": 70 }, "material": "concrete" },
+    { "id": "w_bottom",  "start": { "row": 55, "col": 10 }, "end": { "row": 55, "col": 70 }, "material": "concrete" },
+    { "id": "w_left",    "start": { "row": 8,  "col": 10 }, "end": { "row": 55, "col": 10 }, "material": "concrete" },
+    { "id": "w_right",   "start": { "row": 8,  "col": 70 }, "end": { "row": 55, "col": 70 }, "material": "concrete" },
+    { "id": "w_slab",    "start": { "row": 38, "col": 10 }, "end": { "row": 38, "col": 70 }, "material": "drywall" },
+    { "id": "w_vert12",  "start": { "row": 8,  "col": 55 }, "end": { "row": 38, "col": 55 }, "material": "drywall" },
+    { "id": "w_vert31",  "start": { "row": 8,  "col": 27 }, "end": { "row": 38, "col": 27 }, "material": "drywall" }
+  ],
+  "doors": [
+    { "id": "d_lobby",   "wallSegmentId": "w_slab",   "centerCell": { "row": 38, "col": 42 }, "widthCells": 4, "dominantAxis": "col" },
+    { "id": "d_r1r2",    "wallSegmentId": "w_vert12", "centerCell": { "row": 24, "col": 55 }, "widthCells": 4, "dominantAxis": "row" },
+    { "id": "d_r3r1",    "wallSegmentId": "w_vert31", "centerCell": { "row": 30, "col": 27 }, "widthCells": 4, "dominantAxis": "row" }
+  ],
+  "entrance": { "row": 52, "col": 40 },
+  "target":   { "row": 15, "col": 63 }
+}

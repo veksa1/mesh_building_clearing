@@ -12,6 +12,7 @@ import numpy as np
 class VisualDetectionKind(str, Enum):
     DOORWAY_GAP = "DOORWAY_GAP"
     CORRIDOR_BRANCH = "CORRIDOR_BRANCH"
+    TARGET = "TARGET"
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,70 @@ def _patch_signature(wall: np.ndarray, ar: int, ac: int, half: int = 2) -> str:
             bits.append(1 if _oob_wall(wall, rr, cc) else 0)
     raw = bytes(bits)
     return hex(zlib.adler32(raw) & 0xFFFFFFFF)[2:]
+
+
+def _has_los(wall: np.ndarray, r0: int, c0: int, r1: int, c1: int) -> bool:
+    """Bresenham wall-stop ray: True iff no wall pixel sits strictly between (r0,c0) and (r1,c1)."""
+    h, w = wall.shape
+    dr = abs(r1 - r0)
+    dc = abs(c1 - c0)
+    sr = 1 if r0 < r1 else -1
+    sc = 1 if c0 < c1 else -1
+    err = dc - dr
+    rr, cc = r0, c0
+    while True:
+        if (rr, cc) != (r0, c0) and (rr, cc) != (r1, c1):
+            if not (0 <= rr < h and 0 <= cc < w) or wall[rr, cc]:
+                return False
+        if rr == r1 and cc == c1:
+            return True
+        e2 = 2 * err
+        if e2 > -dr:
+            err -= dr
+            cc += sc
+        if e2 < dc:
+            err += dc
+            rr += sr
+
+
+def detect_target(
+    wall: np.ndarray,
+    ego_r: int,
+    ego_c: int,
+    target_rc: tuple[int, int] | None,
+    *,
+    radius: int,
+    rng: np.random.Generator | None = None,
+    dropout_prob: float = 0.0,
+    noise_span: float = 0.04,
+) -> VisualDetection | None:
+    """YOLO-class TARGET hit when target lies inside the LOS vision disc."""
+    if target_rc is None:
+        return None
+    tr, tc = int(target_rc[0]), int(target_rc[1])
+    if abs(tr - ego_r) + abs(tc - ego_c) > radius:
+        return None
+    if not _has_los(wall, ego_r, ego_c, tr, tc):
+        return None
+    bdr, bdc = _bearing_from_ego(ego_r, ego_c, tr, tc)
+    sig = _patch_signature(wall, tr, tc, half=2)
+    conf = 0.95
+    if rng is not None:
+        if rng.random() < dropout_prob:
+            return None
+        conf = float(np.clip(conf + rng.uniform(-noise_span, noise_span), 0.05, 0.99))
+    return VisualDetection(
+        kind=VisualDetectionKind.TARGET,
+        bearing_dr=bdr,
+        bearing_dc=bdc,
+        corridor_dr=0,
+        corridor_dc=0,
+        anchor_r=tr,
+        anchor_c=tc,
+        width_cells=1,
+        confidence=conf,
+        signature=f"TGT:{sig}",
+    )
 
 
 def _bearing_from_ego(er: int, ec: int, ar: int, ac: int) -> tuple[int, int]:

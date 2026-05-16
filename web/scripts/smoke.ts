@@ -1,50 +1,58 @@
-import { defaultFloorplan } from '../lib/defaultFloorplan';
-import { compile } from '../lib/compiler';
-import { DEFAULT_SIM_PARAMS } from '../constants';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { adoptBundle } from '../lib/bundleLoader';
 
-const fp = defaultFloorplan();
-console.log('walls:', fp.walls.length, 'doors:', fp.doors.length);
+// Smoke-test the static bundle without spinning up Next.
+// Run: npx tsx scripts/smoke.ts
+const bundlePath = resolve(__dirname, '../public/sim/default.bundle.json');
+const raw = JSON.parse(readFileSync(bundlePath, 'utf-8'));
 
 const t0 = Date.now();
-const result = compile(fp, DEFAULT_SIM_PARAMS);
+const compiled = adoptBundle(raw);
 const ms = Date.now() - t0;
-console.log('compile took', ms, 'ms');
+console.log('adoptBundle took', ms, 'ms');
 
-if (!result.ok) {
-  console.error('COMPILE FAILED:', result.error);
-  process.exit(1);
-}
-
-const { compiled } = result;
+console.log('schemaVersion:', raw.schemaVersion);
+console.log('meta:', compiled.meta);
 console.log('rooms:', compiled.roomGraph.rooms.map((r) => r.id));
 console.log('entranceRoom:', compiled.roomGraph.entranceRoomId);
 console.log('targetRoom:', compiled.roomGraph.targetRoomId);
-console.log('adjacency:', Array.from(compiled.roomGraph.adjacency.entries()).map(([k, v]) => `${k}->[${v}]`).join(', '));
 console.log('timeline frames:', compiled.timeline.length);
 console.log('vmin/vmax:', compiled.heatmapVmin.toFixed(1), '/', compiled.heatmapVmax.toFixed(1));
 
-const phases = compiled.timeline.reduce((acc: Record<string, number>, f) => {
-  acc[f.phase] = (acc[f.phase] || 0) + 1;
-  return acc;
-}, {});
+const phases: Record<string, number> = {};
+for (const f of compiled.timeline) phases[f.phase] = (phases[f.phase] ?? 0) + 1;
 console.log('phase counts:', phases);
 
+const targetFirst = compiled.timeline.findIndex((f) => f.targetSeen);
 const neutralFrame = compiled.timeline.find((f) => f.phase === 'neutralised');
+console.log('first target detection at frame:', targetFirst);
 console.log('neutralised reached:', neutralFrame ? 'yes' : 'no');
 
-// Inspect comm events
-const sample = compiled.timeline[20];
-console.log('frame 20 tick:', sample.tick);
-console.log('frame 20 drones:', sample.dronesRC.map((d) => `(${d.row},${d.col})`).join(' '));
-console.log('frame 20 commLinks:', sample.commLinks.length);
-console.log('frame 20 rfLogTail (last 3):');
-for (const line of sample.rfLogTail.slice(-3)) console.log('  ', line);
+const sample = compiled.timeline[Math.min(20, compiled.timeline.length - 1)];
+console.log('sample frame tick:', sample.tick);
+console.log('sample drones:', sample.dronesRC.map((d) => `(${d.row},${d.col})`).join(' '));
+console.log('sample commLinks:', sample.commLinks.length);
+console.log('sample cvDetections:', sample.cvDetections.length);
+console.log('sample knownFreeDelta:', sample.knownFreeDelta.length);
 
-let totalLinks = 0;
+let totalKnown = 0;
+let totalCv = 0;
 let maxLinks = 0;
 for (const f of compiled.timeline) {
-  totalLinks += f.commLinks.length;
+  totalKnown += f.knownFreeDelta.length;
+  totalCv += f.cvDetections.length;
   if (f.commLinks.length > maxLinks) maxLinks = f.commLinks.length;
 }
-console.log('avg commLinks/frame:', (totalLinks / compiled.timeline.length).toFixed(1));
-console.log('max commLinks in a frame:', maxLinks);
+console.log('total known cells (union):', totalKnown);
+console.log('total CV detections:', totalCv);
+console.log('max commLinks in a single frame:', maxLinks);
+
+if (compiled.timeline.length === 0) {
+  console.error('FAIL: empty timeline');
+  process.exit(1);
+}
+if (!neutralFrame) {
+  console.warn('WARN: no neutralised frame — try a longer --ticks horizon');
+}
+console.log('OK');

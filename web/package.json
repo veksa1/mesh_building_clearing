@@ -5,7 +5,10 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "sim:export": "cd ../.. && python3 -m swarm_sim.export_sim swarm_sim/web/public/floorplans/default.json -o swarm_sim/web/public/sim/default.bundle.json --ticks 1500 --n-drones 7 --seed 0 --explorer-phase 25",
+    "smoke": "npx tsx scripts/smoke.ts",
+    "prebuild": "npm run sim:export"
   },
   "dependencies": {
     "next": "16.2.6",
@@ -18,6 +21,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "tailwindcss": "^4",
+    "tsx": "^4.19.2",
     "typescript": "^5"
   }
 }

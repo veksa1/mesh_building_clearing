@@ -34,6 +34,18 @@ class DecentralizedFrame:
     rooms_discovered_sorted: tuple[int, ...] = ()
     #: Entrance-rooted spanning-tree edges (same as centralized ``bfs_plan`` order).
     room_spanning_edges: tuple[tuple[int, int], ...] = ()
+    #: Cells newly added to the swarm-wide known-free union this tick (delta encoding).
+    known_free_delta: tuple[tuple[int, int], ...] = ()
+    #: Per-drone YOLO-shaped detections this tick — application-layer evidence.
+    cv_detections: tuple[dict, ...] = ()
+    #: True iff any drone has a TARGET detection this tick (mission complete).
+    target_seen: bool = False
+    #: When ``target_seen``, the (drone_uid, anchor_r, anchor_c, confidence) of the witness.
+    target_witness: tuple[int, int, int, float] | None = None
+    #: Belief portal-edges as serialisable triples (signature, region_a, region_b).
+    belief_edges: tuple[tuple[str, str, str], ...] = ()
+    #: Animation phase string for the web renderer.
+    phase: str = "exploring"
 
 
 def _room_spanning_tree_segments(
@@ -368,13 +380,15 @@ def run_decentralized(
     merge_interval: int = 10,
     explorer_phase_ticks: int | None = None,
     decentralized_policy: str = "layout_bfs",
+    target_rc: tuple[int, int] | None = None,
+    neutralised_dwell_ticks: int = 18,
 ) -> tuple[list[DecentralizedFrame], list[CommEvent]]:
     if decentralized_policy not in ("layout_bfs", "local_sense"):
         raise ValueError(f"unknown decentralized_policy: {decentralized_policy!r}")
     use_layout = decentralized_policy == "layout_bfs"
 
     rng = rng if rng is not None else np.random.default_rng(seed)
-    env = Environment(building)
+    env = Environment(building, target_rc=target_rc)
     radio = RadioMedium(building.wall, radio_cfg)
     spawns = _spawn_positions(building, n_drones)
 
@@ -412,14 +426,22 @@ def run_decentralized(
             phase_len = max(1, int(explorer_phase_ticks))
 
     n_agents = len(agents)
-    overlay = CommsOverlay(ttl_ticks=DEFAULT_OVERLAY_TTL)
+    overlay = CommsOverlay(ttl_ticks=4)
     log_buf: deque[str] = deque(maxlen=max(8, rf_log_cap))
     all_events: list[CommEvent] = []
 
     frames: list[DecentralizedFrame] = []
     pending_rx: list[tuple[int, Packet, float]] = []
 
+    cv_hits_per_drone: dict[int, list[dict]] = {a.uid: [] for a in agents}
+    target_witness: tuple[int, int, int, float] | None = None
+    neutralised_phase_ticks_left = 0
+    neutralised_done = False
+    prev_known_union: set[tuple[int, int]] = set()
+
     for tick in range(n_ticks):
+        if neutralised_done:
+            break
         for a in agents:
             a.drain_inbox(tick)
 
@@ -431,6 +453,7 @@ def run_decentralized(
         priority_uid: int | None = None
         defer_uid: int | None = None
         tree_segments: list[tuple[tuple[int, int], tuple[int, int]]] = []
+        cv_hits_per_drone = {a.uid: [] for a in agents}
 
         if use_layout:
             scout_uid = max(0, n_agents - 1)
@@ -447,6 +470,33 @@ def run_decentralized(
                 a.absorb_readings(readings)
                 detections = env.detect_openings(a.r, a.c, radius=a.vision_radius, rng=None)
                 a.observe_visual(detections)
+                tgt_det = env.detect_target(a.r, a.c, radius=a.vision_radius, rng=None)
+                if tgt_det is not None:
+                    detections = list(detections) + [tgt_det]
+                    if target_witness is None:
+                        # (witness_uid, target_row, target_col, confidence)
+                        target_witness = (
+                            int(a.uid),
+                            int(tgt_det.anchor_r),
+                            int(tgt_det.anchor_c),
+                            float(tgt_det.confidence),
+                        )
+                        neutralised_phase_ticks_left = neutralised_dwell_ticks
+                cv_hits_per_drone[a.uid] = [
+                    {
+                        "uid": a.uid,
+                        "kind": d.kind.value,
+                        "bearing": [int(d.bearing_dr), int(d.bearing_dc)],
+                        "anchor": [int(d.anchor_r), int(d.anchor_c)],
+                        "confidence": round(float(d.confidence), 3),
+                        "signature": str(d.signature),
+                    }
+                    for d in detections
+                ]
+
+                if neutralised_phase_ticks_left > 0:
+                    intents[a.uid] = (a.r, a.c)
+                    continue
                 if explorer is not None and a.uid == explorer_uid:
                     intents[a.uid] = a.decide_move(
                         env, rng, tick=tick, portal_cross_allowed=True
@@ -457,7 +507,7 @@ def run_decentralized(
                     intents[a.uid] = a.decide_move(
                         env, rng, tick=tick, portal_cross_allowed=True
                     ).target_rc
-            priority_uid = explorer_uid if explorer is not None else None
+            priority_uid = explorer_uid if explorer is not None and neutralised_phase_ticks_left == 0 else None
             tree_segments = _exploration_bfs_tree_segments(lead) if lead is not None else []
 
         resolve_moves_sequential(
@@ -558,19 +608,79 @@ def run_decentralized(
                 f"tick={tick}/{max(n_ticks - 1, 1)}. Gray lines: BFS tree on explorer map.\n"
             )
 
+        cv_flat: list[dict] = []
+        for uid in sorted(cv_hits_per_drone.keys()):
+            cv_flat.extend(cv_hits_per_drone[uid])
+        # Keep TARGET hits + top doorway detections so the renderer panel stays compact.
+        target_hits = [d for d in cv_flat if d.get("kind") == "TARGET"]
+        other_hits = [d for d in cv_flat if d.get("kind") != "TARGET"]
+        other_hits.sort(key=lambda d: -float(d.get("confidence", 0.0)))
+        cv_flat = target_hits + other_hits[:8]
+
+        known_union: set[tuple[int, int]] = set()
+        if not use_layout:
+            for a in agents:
+                known_union |= a.known_free
+        # Frame stores only the cells newly observed since the previous tick.
+        # The renderer reconstructs the full fog mask by accumulating deltas.
+        new_cells = sorted(known_union - prev_known_union)
+        prev_known_union = known_union
+        known_tuple = tuple(new_cells)
+
+        belief_edges_t: tuple[tuple[str, str, str], ...] = ()
+        if not use_layout and lead is not None:
+            belief_edges_t = tuple(sorted(lead.belief_edges))
+
+        if neutralised_phase_ticks_left > 0:
+            phase_str = "neutralised"
+            neutralised_phase_ticks_left -= 1
+            if neutralised_phase_ticks_left == 0:
+                neutralised_done = True
+        else:
+            phase_str = "exploring"
+
+        target_seen_flag = target_witness is not None
+        target_witness_payload = target_witness  # (uid, target_r, target_c, confidence)
+
+        if phase_str == "neutralised" and target_witness_payload is not None:
+            phase_line_str = (
+                f"NEUTRALISED — drone {target_witness_payload[0]} sees TARGET at "
+                f"({target_witness_payload[1]},{target_witness_payload[2]})."
+            )
+        else:
+            phase_line_str = f"Tick {tick} — moves resolved (UID order); mesh TX/RX logged."
+
         frames.append(
             DecentralizedFrame(
                 drones_rc=[(float(a.r), float(a.c)) for a in sorted(agents, key=lambda x: x.uid)],
                 caption=caption,
                 layout_name=layout_name,
                 belief_panel=belief_panel,
-                phase_line=f"Tick {tick} — moves resolved (UID order); mesh TX/RX logged.",
+                phase_line=phase_line_str,
                 discovered_line=discovered_line,
                 rf_log_tail=list(log_buf),
-                comm_links=list(overlay.links),
+                # FadedLink is mutable and gets decremented on subsequent ticks; clone now.
+                comm_links=[
+                    FadedLink(
+                        ticks_left=lk.ticks_left,
+                        r0=lk.r0,
+                        c0=lk.c0,
+                        r1=lk.r1,
+                        c1=lk.c1,
+                        msg_type=lk.msg_type,
+                        outcome=lk.outcome,
+                    )
+                    for lk in overlay.links
+                ],
                 tree_segments_rc=tree_segments,
                 rooms_discovered_sorted=rooms_disc_t,
                 room_spanning_edges=span_edges_t,
+                known_free_delta=known_tuple,
+                cv_detections=tuple(cv_flat),
+                target_seen=target_seen_flag,
+                target_witness=target_witness_payload,
+                belief_edges=belief_edges_t,
+                phase=phase_str,
             )
         )
 

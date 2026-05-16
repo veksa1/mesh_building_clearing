@@ -25,9 +25,15 @@ class Environment:
     Agents interact through ``sense_disc``, ``legal_steps``, ``walkable`` — not ``adjacency``.
     """
 
-    def __init__(self, building: BuildingMap) -> None:
+    def __init__(
+        self,
+        building: BuildingMap,
+        *,
+        target_rc: tuple[int, int] | None = None,
+    ) -> None:
         self._b = building
         self.wall = building.wall
+        self.target_rc = target_rc
 
     @property
     def shape(self) -> tuple[int, int]:
@@ -73,3 +79,16 @@ class Environment:
         from .perception import detect_openings as _detect
 
         return _detect(self.wall, r, c, radius=radius, rng=rng)
+
+    def detect_target(
+        self,
+        r: int,
+        c: int,
+        *,
+        radius: int,
+        rng: np.random.Generator | None = None,
+    ):
+        """YOLO-class TARGET hit when ``self.target_rc`` is inside the LOS vision disc."""
+        from .perception import detect_target as _detect_target
+
+        return _detect_target(self.wall, r, c, self.target_rc, radius=radius, rng=rng)

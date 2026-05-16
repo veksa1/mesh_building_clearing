@@ -27,6 +27,7 @@ const initialState: AppState = {
   currentFrame: 0,
   isPlaying: false,
   compilationError: null,
+  viewMode: 'drone',
 };
 
 function appReducer(state: AppState, action: AppAction): AppState {
@@ -104,7 +105,10 @@ function appReducer(state: AppState, action: AppAction): AppState {
         ...initialState,
         floorplan: state.floorplan,
         editor: { ...initialState.editor, selectedMaterial: state.editor.selectedMaterial },
+        viewMode: state.viewMode,
       };
+    case 'SET_VIEW_MODE':
+      return { ...state, viewMode: action.viewMode };
     default:
       return state;
   }
@@ -116,16 +120,29 @@ export function SimApp() {
   // Trigger compile when entering 'compiling' mode.
   useEffect(() => {
     if (state.mode !== 'compiling') return;
-    const t = setTimeout(() => {
-      const result = compile(state.floorplan, state.simParams);
-      if (result.ok) {
-        dispatch({ type: 'COMPILATION_DONE', result: result.compiled });
-      } else {
-        dispatch({ type: 'COMPILATION_FAILED', error: result.error });
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await compile(state.floorplan);
+        if (cancelled) return;
+        if (result.ok) {
+          dispatch({ type: 'COMPILATION_DONE', result: result.compiled });
+        } else {
+          dispatch({ type: 'COMPILATION_FAILED', error: result.error });
+        }
+      } catch (err) {
+        if (!cancelled) {
+          dispatch({
+            type: 'COMPILATION_FAILED',
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
-    }, 30);
-    return () => clearTimeout(t);
-  }, [state.mode, state.floorplan, state.simParams]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [state.mode, state.floorplan]);
 
   useAnimationLoop(state.isPlaying, () => dispatch({ type: 'TICK_FRAME' }));
 
@@ -152,6 +169,7 @@ export function SimApp() {
             compiled={state.compiled}
             params={state.simParams}
             currentFrame={state.currentFrame}
+            viewMode={state.viewMode}
           />
         )}
         {isNeutralised && <NeutralisedOverlay visible={true} />}
@@ -165,6 +183,8 @@ export function SimApp() {
               frame={currentFrameState}
               roomGraph={state.compiled.roomGraph}
               currentFrame={state.currentFrame}
+              viewMode={state.viewMode}
+              setViewMode={(viewMode) => dispatch({ type: 'SET_VIEW_MODE', viewMode })}
             />
           </div>
         </aside>

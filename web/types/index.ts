@@ -70,7 +70,9 @@ export interface RoomGraph {
 
 export type DroneRC = { row: number; col: number };
 
-export type SimPhase = 'staging' | 'traversing' | 'settled' | 'neutralised';
+export type SimPhase = 'staging' | 'traversing' | 'settled' | 'neutralised' | 'exploring';
+
+export type ViewMode = 'drone' | 'oracle';
 
 export type MsgKind = 'BEACON' | 'TOPOLOGY_MERGE' | 'TOKEN';
 export type MsgOutcome = 'delivered' | 'below_threshold' | 'tx';
@@ -98,19 +100,51 @@ export interface RFEvent {
 
 export type DroneRole = 'scout' | 'relay';
 
-export interface FrameState {
-  dronesRC: DroneRC[];
-  droneRoles: DroneRole[];
-  phase: SimPhase;
-  caption: string;
+// One YOLO-shaped detection emitted by a drone's onboard CV stack.
+export interface CvDetection {
+  uid: number;
+  kind: 'DOORWAY_GAP' | 'CORRIDOR_BRANCH' | 'TARGET';
+  bearing: [number, number];
+  anchor: [number, number];
+  confidence: number;
+  signature: string;
+}
+
+export interface TargetWitness {
+  uid: number;
+  row: number;
+  col: number;
+  confidence: number;
+}
+
+// Oracle-only ground-truth view that lives alongside the per-tick frame.
+// Agents do not see this — it is solely for the Drone vs Oracle toggle.
+export interface OracleFrameOverlay {
+  roomsDiscovered: number[];
   queueRooms: number[];
-  phaseLine: string;
-  discoveredLine: string;
-  committedBfsEdges: [number, number][];
+  committedEdges: [number, number][];
+  spanningEdges: [number, number][];
+}
+
+export interface FrameState {
+  tick: number;
+  phase: SimPhase;
+  dronesRC: DroneRC[];
   commLinks: CommLink[];
   rfLogTail: string[];
-  tick: number;
-  activeEdge: [number, number] | null;
+  cvDetections: CvDetection[];
+  beliefEdges: [string, string, string][];
+  // Cells newly observed since the previous tick — renderer accumulates the fog mask.
+  knownFreeDelta: [number, number][];
+  // Flat int array [r0,c0,r1,c1,...] for the lead explorer's BFS spanning tree.
+  // Refreshed only on keyframes; null between keyframes (renderer carries the last value).
+  treeSegmentsRC: number[] | null;
+  targetSeen: boolean;
+  targetWitness: TargetWitness | null;
+  phaseLine: string;
+  discoveredLine: string;
+  caption: string;
+  oracle: OracleFrameOverlay;
 }
 
 export interface SimParams {
@@ -130,6 +164,18 @@ export interface CompiledSim {
   timeline: FrameState[];
   heatmapVmin: number;
   heatmapVmax: number;
+  meta: SimulationBundleMeta;
+  entrance: GridPoint;
+  target: GridPoint;
+}
+
+export interface SimulationBundleMeta {
+  name: string;
+  ticks: number;
+  nDrones: number;
+  seed: number;
+  policy: string;
+  schemaVersion: number;
 }
 
 export type AppAction =
@@ -149,7 +195,8 @@ export type AppAction =
   | { type: 'TICK_FRAME' }
   | { type: 'SEEK_FRAME'; frame: number }
   | { type: 'TOGGLE_PLAY' }
-  | { type: 'RESET' };
+  | { type: 'RESET' }
+  | { type: 'SET_VIEW_MODE'; viewMode: ViewMode };
 
 export interface AppState {
   mode: AppMode;
@@ -160,6 +207,7 @@ export interface AppState {
   currentFrame: number;
   isPlaying: boolean;
   compilationError: string | null;
+  viewMode: ViewMode;
 }
 
 export interface RSSIRequest {
