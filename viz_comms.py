@@ -75,11 +75,36 @@ class CommsOverlay:
         self.links = [lk for lk in self.links if lk.ticks_left > 0]
 
 
-def format_rf_panel(*, lines: list[str], tail: int) -> str:
+def format_rf_panel(*, lines: list[str], tail: int, title: str | None = None) -> str:
     tail_n = max(0, int(tail))
     shown = lines[-tail_n:] if tail_n else lines
     body = "\n".join(shown) if shown else "(no RF traffic yet)"
-    return "RF plane (sim observer)\n" + "─" * 26 + "\n\n" + body
+    hdr = title if title is not None else "RF / mesh observer"
+    return hdr + "\n" + "─" * 26 + "\n\n" + body
+
+
+def format_decentralized_telemetry_panel(
+    *,
+    rf_lines: list[str],
+    mesh_lines: list[str],
+    rf_tail: int,
+    mesh_tail: int,
+    show_rf: bool,
+) -> str:
+    """RF CommEvent tail plus optional app/mesh gossip HUD (adopt + honest TX lines)."""
+    parts: list[str] = []
+    if show_rf:
+        parts.append(format_rf_panel(lines=rf_lines, tail=rf_tail))
+    else:
+        parts.append("RF panel disabled (--no-viz-comms-panel).")
+    mesh_n = max(0, int(mesh_tail))
+    if mesh_n > 0:
+        mesh_shown = mesh_lines[-mesh_n:] if mesh_n else mesh_lines
+        mesh_body = "\n".join(mesh_shown) if mesh_shown else "(no gossip lines yet)"
+        parts.append(
+            "App / mesh gossip (gates)\n" + "─" * 26 + "\n\n" + mesh_body
+        )
+    return "\n\n".join(parts)
 
 
 def plot_comm_links(

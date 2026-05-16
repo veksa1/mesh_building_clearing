@@ -20,7 +20,7 @@ the response body matches the schema produced by
 
 ## Endpoints
 
-- `GET /healthz` — readiness probe; returns `{ ok, auth, maxTicks, maxDrones }`.
+- `GET /healthz` — readiness probe; returns `{ ok, auth, maxTicks, maxDrones, commBackend, udpBasePort }`.
 - `POST /export` (and `POST /v1/sim/export`) — runs the simulation. Body:
 
   ```json
@@ -30,12 +30,16 @@ the response body matches the schema produced by
     "nDrones": 7,
     "seed": 0,
     "explorerPhaseTicks": 25,
-    "params": { "freqMhz": 2400, "txPowerDbm": 20, "distanceExponent": 28, "raySamples": 48 }
+    "params": { "freqMhz": 2400, "txPowerDbm": 20, "distanceExponent": 28, "raySamples": 48 },
+    "commBackend": "udp",
+    "udpBasePort": 8700
   }
   ```
 
-  All fields except `floorplan` are optional and default to the values used by
-  `npm run sim:export`.
+  All fields except `floorplan` are optional. `commBackend` defaults to
+  `SIM_COMM_BACKEND` (server-side) and accepts `udp` (primary, multiprocess
+  mesh) or `inprocess` (single-process fallback). UDP failures auto-fall back
+  to `inprocess`; the backend actually used is reported in `meta.commBackend`.
 
 ## Environment variables
 
@@ -45,6 +49,8 @@ the response body matches the schema produced by
 | `SIM_API_CORS_ORIGINS` | `*` | Comma-separated allow-list, e.g. `https://app.vercel.app,https://localhost:3000`. |
 | `SIM_API_MAX_TICKS` | `2000` | Hard cap on the `ticks` field to prevent runaway requests. |
 | `SIM_API_MAX_DRONES` | `32` | Hard cap on `nDrones`. |
+| `SIM_COMM_BACKEND` | `udp` | Default mesh backend. `udp` runs one OS process per drone with localhost UDP propagation; `inprocess` is the single-process fallback. UDP exceptions auto-fall back to `inprocess` and the actual backend is reported in `meta.commBackend`. |
+| `SIM_UDP_BASE_PORT` | `8700` | Base listen port for UDP workers (drone uid `i` binds `BASE+i`). If the block is busy, the kernel scans upward for a free block. |
 
 ## Run locally
 
@@ -116,3 +122,15 @@ docker run --rm -p 8080:8080 \
   tens of seconds. Configure Verda's request timeout accordingly (60–120s).
 - For public deployments either set `SIM_API_TOKEN` or front the service with
   a Cloudflare / Vercel proxy that handles rate-limiting.
+
+## Mesh backend (UDP vs in-process)
+
+UDP is the primary simulation backend: each drone runs in its own OS process
+with a real UDP socket on loopback (`SIM_UDP_BASE_PORT + uid`). Only port 8080
+needs to be exposed externally — all mesh traffic stays inside the container.
+
+If `spawn`-style multiprocessing isn't available (locked-down Verda images,
+short-lived sandboxes), the kernel logs a warning and falls back to the
+in-process kernel for that request, so exports always succeed. Force the
+fallback globally with `SIM_COMM_BACKEND=inprocess` or per-request with
+`"commBackend": "inprocess"` in the POST body.

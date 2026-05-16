@@ -14,6 +14,10 @@ Environment:
     SIM_API_CORS_ORIGINS   Comma-separated list of allowed origins (default: ``*``).
     SIM_API_MAX_TICKS      Upper bound on the ``ticks`` field (default: 2000).
     SIM_API_MAX_DRONES     Upper bound on the ``nDrones`` field (default: 32).
+    SIM_COMM_BACKEND       Default mesh backend (``udp`` or ``inprocess``, default ``udp``).
+                           UDP failures auto-fall back to ``inprocess`` and the
+                           backend actually used is reported in ``meta.commBackend``.
+    SIM_UDP_BASE_PORT      Base UDP port for drone workers (default 8700; uid i -> base+i).
 """
 
 from __future__ import annotations
@@ -38,7 +42,11 @@ _REPO_PARENT = _HERE.parent.parent
 if str(_REPO_PARENT) not in sys.path:
     sys.path.insert(0, str(_REPO_PARENT))
 
-from swarm_sim.export_sim import DEFAULT_PARAMS, export_bundle_from_dict  # noqa: E402
+from swarm_sim.export_sim import (  # noqa: E402
+    DEFAULT_PARAMS,
+    VALID_COMM_BACKENDS,
+    export_bundle_from_dict,
+)
 
 logger = logging.getLogger("sim_api")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -89,6 +97,9 @@ class ExportRequest(BaseModel):
     # Optional override of the radio / heatmap params; unspecified keys fall
     # back to DEFAULT_PARAMS, which matches web/constants.ts DEFAULT_SIM_PARAMS.
     params: dict[str, float] | None = None
+    # Per-request backend overrides; default to the server-level env config.
+    commBackend: str | None = None
+    udpBasePort: int | None = None
 
 
 # ---------- auth + config helpers --------------------------------------------
@@ -97,6 +108,10 @@ class ExportRequest(BaseModel):
 _TOKEN = os.getenv("SIM_API_TOKEN", "").strip()
 _MAX_TICKS = int(os.getenv("SIM_API_MAX_TICKS", "2000"))
 _MAX_DRONES = int(os.getenv("SIM_API_MAX_DRONES", "32"))
+_DEFAULT_BACKEND = os.getenv("SIM_COMM_BACKEND", "udp").strip().lower() or "udp"
+if _DEFAULT_BACKEND not in VALID_COMM_BACKENDS:
+    _DEFAULT_BACKEND = "udp"
+_DEFAULT_UDP_BASE_PORT = int(os.getenv("SIM_UDP_BASE_PORT", "8700"))
 _bearer = HTTPBearer(auto_error=False)
 
 
@@ -157,7 +172,14 @@ async def add_request_id(request: Request, call_next):
 
 @app.get("/healthz")
 def healthz() -> dict[str, Any]:
-    return {"ok": True, "auth": bool(_TOKEN), "maxTicks": _MAX_TICKS, "maxDrones": _MAX_DRONES}
+    return {
+        "ok": True,
+        "auth": bool(_TOKEN),
+        "maxTicks": _MAX_TICKS,
+        "maxDrones": _MAX_DRONES,
+        "commBackend": _DEFAULT_BACKEND,
+        "udpBasePort": _DEFAULT_UDP_BASE_PORT,
+    }
 
 
 @app.post("/export", dependencies=[Depends(require_token)])
@@ -166,6 +188,14 @@ def export(req: ExportRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=f"ticks must be in 1..{_MAX_TICKS}")
     if req.nDrones <= 0 or req.nDrones > _MAX_DRONES:
         raise HTTPException(status_code=400, detail=f"nDrones must be in 1..{_MAX_DRONES}")
+
+    backend = (req.commBackend or _DEFAULT_BACKEND).strip().lower()
+    if backend not in VALID_COMM_BACKENDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"commBackend must be one of {VALID_COMM_BACKENDS}",
+        )
+    udp_base_port = int(req.udpBasePort) if req.udpBasePort is not None else _DEFAULT_UDP_BASE_PORT
 
     params = _merged_params(req.params)
     params["nDrones"] = float(req.nDrones)
@@ -179,6 +209,8 @@ def export(req: ExportRequest) -> dict[str, Any]:
             seed=int(req.seed),
             params=params,
             explorer_phase_ticks=req.explorerPhaseTicks,
+            comm_backend=backend,
+            udp_base_port=udp_base_port,
         )
     except (ValueError, ValidationError) as exc:
         # Floorplan validation errors (e.g. entrance on wall) — caller's fault.

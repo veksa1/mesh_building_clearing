@@ -46,6 +46,8 @@ class DecentralizedFrame:
     belief_edges: tuple[tuple[str, str, str], ...] = ()
     #: Animation phase string for the web renderer.
     phase: str = "exploring"
+    #: Rolling gossip adoption / originate lines for Telemetry HUD tail.
+    mesh_activity_tail: list[str] = field(default_factory=list)
 
 
 def _room_spanning_tree_segments(
@@ -239,6 +241,52 @@ def _follower_mesh_intent(
     return legal[int(rng.integers(0, len(legal)))]
 
 
+def follower_mesh_intent_from_explorer_rc(
+    follower: DroneAgent,
+    explorer_rc: tuple[int, int],
+    env: Environment,
+    rng: np.random.Generator,
+    *,
+    d_lo: int = 2,
+    d_hi: int = 8,
+) -> tuple[int, int]:
+    """Same as :func:`_follower_mesh_intent` but explorer position supplied explicitly (distributed workers)."""
+    er, ec = explorer_rc
+
+    def md(r: int, c: int) -> int:
+        return abs(r - er) + abs(c - ec)
+
+    dist = md(follower.r, follower.c)
+    legal = env.legal_steps(follower.r, follower.c)
+    if not legal:
+        return (follower.r, follower.c)
+
+    if dist > d_hi:
+        return min(legal, key=lambda p: md(p[0], p[1]))
+    if dist < d_lo:
+        farther = [p for p in legal if md(p[0], p[1]) > dist]
+        if farther:
+            return max(farther, key=lambda p: md(p[0], p[1]))
+        return (follower.r, follower.c)
+    if rng.random() < 0.93:
+        return (follower.r, follower.c)
+    return legal[int(rng.integers(0, len(legal)))]
+
+
+class PoseResolveShell:
+    """Duck-compatible with :class:`DroneAgent` for move resolution (``.uid``, ``.r``, ``.c``, ``apply_pose``)."""
+
+    __slots__ = ("uid", "r", "c")
+
+    def __init__(self, uid: int, r: int, c: int) -> None:
+        self.uid = int(uid)
+        self.r = int(r)
+        self.c = int(c)
+
+    def apply_pose(self, r: int, c: int) -> None:
+        self.r, self.c = int(r), int(c)
+
+
 def _layout_relieve_scout_head(
     agents: list[DroneAgent],
     intents: dict[int, tuple[int, int]],
@@ -382,6 +430,7 @@ def run_decentralized(
     decentralized_policy: str = "layout_bfs",
     target_rc: tuple[int, int] | None = None,
     neutralised_dwell_ticks: int = 18,
+    mesh_activity_tail_cap: int = 36,
 ) -> tuple[list[DecentralizedFrame], list[CommEvent]]:
     if decentralized_policy not in ("layout_bfs", "local_sense"):
         raise ValueError(f"unknown decentralized_policy: {decentralized_policy!r}")
@@ -391,6 +440,12 @@ def run_decentralized(
     env = Environment(building, target_rc=target_rc)
     radio = RadioMedium(building.wall, radio_cfg)
     spawns = _spawn_positions(building, n_drones)
+
+    hud_mesh_cap = max(0, int(mesh_activity_tail_cap))
+    mesh_buf: deque[str] = deque(maxlen=max(512, hud_mesh_cap * 16))
+
+    def mesh_sink(line: str) -> None:
+        mesh_buf.append(line)
 
     if use_layout:
         agents: list[DroneAgent] = [
@@ -402,6 +457,7 @@ def run_decentralized(
                 beacon_interval=beacon_interval,
                 merge_interval=merge_interval,
                 fleet_n=max(1, len(spawns)),
+                mesh_activity_sink=mesh_sink,
             )
             for i in range(len(spawns))
         ]
@@ -416,6 +472,7 @@ def run_decentralized(
                 beacon_interval=beacon_interval,
                 merge_interval=merge_interval,
                 fleet_n=max(1, len(spawns)),
+                mesh_activity_sink=mesh_sink,
             )
             for i in range(len(spawns))
         ]
@@ -525,6 +582,7 @@ def run_decentralized(
             pkt = a.maybe_transmit(tick)
             if pkt is None:
                 continue
+            a.emit_mesh_tx_activity(pkt, tick)
             deliveries, evs = radio.broadcast_tick(
                 tick,
                 a.uid,
@@ -542,7 +600,7 @@ def run_decentralized(
 
         all_events.extend(tick_events)
         for ev in tick_events:
-            log_buf.append(ev.format_line())
+            log_buf.append(ev.format_rf_hud_line())
         overlay.ingest_tick(tick_events)
 
         total_nodes = max(len(a.topo_nodes) for a in agents) if agents else 0
@@ -681,6 +739,9 @@ def run_decentralized(
                 target_witness=target_witness_payload,
                 belief_edges=belief_edges_t,
                 phase=phase_str,
+                mesh_activity_tail=(
+                    list(mesh_buf)[-hud_mesh_cap:] if hud_mesh_cap else []
+                ),
             )
         )
 

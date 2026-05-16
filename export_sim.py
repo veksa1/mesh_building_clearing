@@ -18,12 +18,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import pathlib
 import sys
 from collections import deque
 from typing import Any
 
 import numpy as np
+
+_log = logging.getLogger("swarm_sim.export_sim")
 
 # Allow ``python -m <pkg>.export_sim …`` from the repo parent directory.
 _REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -52,6 +55,9 @@ else:
     from .radio import RadioConfig
     from .sim_kernel import DecentralizedFrame, run_decentralized
     from .viz_comms import FadedLink
+
+
+VALID_COMM_BACKENDS = ("udp", "inprocess")
 
 # Same defaults as web/constants.ts DEFAULT_SIM_PARAMS.
 DEFAULT_PARAMS: dict[str, float] = {
@@ -212,6 +218,57 @@ def _serialize_frame(
     }
 
 
+def _run_local_sense(
+    building: Any,
+    *,
+    layout_name: str,
+    n_drones: int,
+    ticks: int,
+    radio_cfg: RadioConfig,
+    seed: int,
+    explorer_phase_ticks: int | None,
+    target_rc: tuple[int, int] | None,
+    comm_backend: str,
+    udp_base_port: int,
+) -> tuple[list[DecentralizedFrame], list, str]:
+    """Run the local-sense kernel via the requested backend; fall back to in-process on UDP errors.
+
+    Returns ``(frames, events, backend_used)`` so callers can record which kernel produced the bundle.
+    """
+    if comm_backend not in VALID_COMM_BACKENDS:
+        raise ValueError(f"unknown comm_backend: {comm_backend!r}")
+
+    common_kwargs = dict(
+        layout_name=layout_name,
+        n_drones=n_drones,
+        n_ticks=ticks,
+        radio_cfg=radio_cfg,
+        rng=np.random.default_rng(int(seed)),
+        rf_log_cap=24,
+        seed=int(seed),
+        explorer_phase_ticks=explorer_phase_ticks,
+        decentralized_policy="local_sense",
+        target_rc=target_rc,
+    )
+
+    if comm_backend == "udp":
+        try:
+            from .sim_kernel_udp import run_decentralized_udp_mesh
+
+            frames, events = run_decentralized_udp_mesh(
+                building,
+                udp_base_port=int(udp_base_port),
+                **common_kwargs,
+            )
+            return frames, events, "udp"
+        except Exception as exc:  # noqa: BLE001 — record & fall back so exports stay reliable
+            _log.warning(
+                "UDP mesh backend failed (%s); falling back to in-process kernel.", exc
+            )
+    frames, events = run_decentralized(building, **common_kwargs)
+    return frames, events, "inprocess"
+
+
 def build_bundle_from_raster(
     raster: FloorplanRaster,
     *,
@@ -222,8 +279,15 @@ def build_bundle_from_raster(
     # Must match the value used inside ``run_decentralized``'s ``CommsOverlay``.
     overlay_ttl: int = 4,
     explorer_phase_ticks: int | None = None,
+    comm_backend: str = "udp",
+    udp_base_port: int = 8700,
 ) -> dict[str, Any]:
-    """Run the local-sense kernel and serialize the bundle dict (no disk I/O)."""
+    """Run the local-sense kernel and serialize the bundle dict (no disk I/O).
+
+    ``comm_backend`` selects the simulation backend: ``"udp"`` (default, multiprocess
+    UDP mesh) or ``"inprocess"`` (single-process fallback). UDP failures auto-fall
+    back; the chosen backend is recorded in ``bundle["meta"]["commBackend"]``.
+    """
     building = building_from_raster(raster)
 
     radio_cfg = RadioConfig(
@@ -234,18 +298,17 @@ def build_bundle_from_raster(
         ray_samples=int(params["raySamples"]),
     )
 
-    frames, _events = run_decentralized(
+    frames, _events, backend_used = _run_local_sense(
         building,
         layout_name=raster.name,
         n_drones=n_drones,
-        n_ticks=ticks,
+        ticks=ticks,
         radio_cfg=radio_cfg,
-        rng=np.random.default_rng(int(seed)),
-        rf_log_cap=24,
-        seed=int(seed),
+        seed=seed,
         explorer_phase_ticks=explorer_phase_ticks,
-        decentralized_policy="local_sense",
         target_rc=raster.target_rc,
+        comm_backend=comm_backend,
+        udp_base_port=udp_base_port,
     )
 
     spanning_edges_all = _entrance_bfs_room_order(raster.adjacency, raster.entrance_room)
@@ -283,6 +346,7 @@ def build_bundle_from_raster(
             "nDrones": n_drones,
             "seed": seed,
             "policy": "local_sense",
+            "commBackend": backend_used,
         },
         "rasterized": {
             "rows": raster.rows,
@@ -320,6 +384,8 @@ def export_bundle_from_dict(
     params: dict[str, float],
     overlay_ttl: int = 4,
     explorer_phase_ticks: int | None = None,
+    comm_backend: str = "udp",
+    udp_base_port: int = 8700,
 ) -> dict[str, Any]:
     """Rasterize an in-memory floorplan dict and return the bundle dict.
 
@@ -334,6 +400,8 @@ def export_bundle_from_dict(
         params=params,
         overlay_ttl=overlay_ttl,
         explorer_phase_ticks=explorer_phase_ticks,
+        comm_backend=comm_backend,
+        udp_base_port=udp_base_port,
     )
 
 
@@ -347,6 +415,8 @@ def export_bundle(
     params: dict[str, float],
     overlay_ttl: int = 4,
     explorer_phase_ticks: int | None = None,
+    comm_backend: str = "udp",
+    udp_base_port: int = 8700,
 ) -> dict[str, Any]:
     """CLI wrapper: load floorplan JSON from disk, build bundle, write JSON to disk."""
     raster = load_floorplan(floorplan_path)
@@ -358,6 +428,8 @@ def export_bundle(
         params=params,
         overlay_ttl=overlay_ttl,
         explorer_phase_ticks=explorer_phase_ticks,
+        comm_backend=comm_backend,
+        udp_base_port=udp_base_port,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(bundle, separators=(",", ":")), encoding="utf-8")
@@ -405,6 +477,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--stride", type=int, default=3)
     parser.add_argument("--dwell", type=int, default=10)
     parser.add_argument("--frames-per-edge", type=int, default=32)
+    parser.add_argument(
+        "--comm-backend",
+        choices=VALID_COMM_BACKENDS,
+        default="udp",
+        help="Mesh backend (default: udp, multiprocess); inprocess is the single-process fallback.",
+    )
+    parser.add_argument(
+        "--udp-base-port",
+        type=int,
+        default=8700,
+        help="With --comm-backend udp: drone uid i listens on PORT+i (default 8700).",
+    )
     args = parser.parse_args(argv)
 
     params = _parse_params(args)
@@ -417,11 +501,14 @@ def main(argv: list[str] | None = None) -> int:
         seed=int(args.seed),
         params=params,
         explorer_phase_ticks=explorer_phase,
+        comm_backend=str(args.comm_backend),
+        udp_base_port=int(args.udp_base_port),
     )
     print(
         f"wrote {args.output} — ticks={len(bundle['timeline'])} "
         f"rooms={len(bundle['roomGraph']['rooms'])} "
-        f"target_seen_at_end={bundle['timeline'][-1]['targetSeen']}"
+        f"target_seen_at_end={bundle['timeline'][-1]['targetSeen']} "
+        f"backend={bundle['meta'].get('commBackend')}"
     )
     return 0
 

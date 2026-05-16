@@ -35,7 +35,7 @@ from swarm_sim.navigation import (
 )
 from swarm_sim.propagation import field_strength_map
 from swarm_sim.room_bfs_plan import bfs_plan, rooms_root_to_u
-from swarm_sim.viz_comms import DEFAULT_OVERLAY_TTL, format_rf_panel, plot_comm_links
+from swarm_sim.viz_comms import DEFAULT_OVERLAY_TTL, format_decentralized_telemetry_panel, plot_comm_links
 
 
 @dataclass
@@ -284,10 +284,17 @@ def _animate_decentralized(
         ha="left",
         linespacing=1.35,
     )
+    mesh_tail_n = int(getattr(args, "viz_mesh_activity_tail", 36))
     rf_body = (
-        format_rf_panel(lines=timeline[0].rf_log_tail, tail=args.viz_comms_tail)
-        if args.viz_comms_panel
-        else "RF panel disabled (--no-viz-comms-panel)."
+        format_decentralized_telemetry_panel(
+            rf_lines=timeline[0].rf_log_tail,
+            mesh_lines=list(timeline[0].mesh_activity_tail),
+            rf_tail=args.viz_comms_tail,
+            mesh_tail=mesh_tail_n,
+            show_rf=bool(args.viz_comms_panel),
+        )
+        if (args.viz_comms_panel or mesh_tail_n > 0)
+        else "Telemetry disabled (--no-viz-comms-panel; --viz-mesh-activity-tail 0)."
     )
     rf_txt = ax_rf.text(
         0.04,
@@ -348,10 +355,19 @@ def _animate_decentralized(
         txt.set_text(state.caption)
         belief_txt.set_text(state.belief_panel)
 
-        if args.viz_comms_panel:
-            rf_txt.set_text(format_rf_panel(lines=state.rf_log_tail, tail=args.viz_comms_tail))
+        mtn = int(getattr(args, "viz_mesh_activity_tail", 36))
+        if args.viz_comms_panel or mtn > 0:
+            rf_txt.set_text(
+                format_decentralized_telemetry_panel(
+                    rf_lines=state.rf_log_tail,
+                    mesh_lines=list(state.mesh_activity_tail),
+                    rf_tail=args.viz_comms_tail,
+                    mesh_tail=mtn,
+                    show_rf=bool(args.viz_comms_panel),
+                )
+            )
         else:
-            rf_txt.set_text("RF panel disabled (--no-viz-comms-panel).")
+            rf_txt.set_text("Telemetry disabled (--no-viz-comms-panel; --viz-mesh-activity-tail 0).")
 
         _update_room_tree_panel(tree_artists, disc_src.rooms_discovered_sorted)
 
@@ -658,10 +674,15 @@ def main() -> int:
             "  wing     — long upper wing + tucked lobby\n\n"
             "Modes (--mode):\n"
             "  centralized_demo — legacy omniscient BFS planner timeline\n"
-            "  decentralized    — environment-backed drones + simulated RF mesh\n"
-            "                     (default: layout-oracle room BFS per drone; see --decentralized-policy)\n\n"
+            "  decentralized    — full discrete takeover simulation + RF HUD (Environment + kernels)\n"
+            "                     (default policy: layout-oracle room BFS; see --decentralized-policy)\n\n"
+            "Radio / mesh backends (decentralized only):\n"
+            "  --comm-backend udp (default): one OS process per drone; packets go over real UDP\n"
+            "                     localhost with RSSI-style decode (--udp-base-port selects base listen port).\n"
+            "  --comm-backend inproc — single-process RadioMedium fallback when UDP/multiprocessing isn't available.\n\n"
             "Examples:\n"
             "  python -m swarm_sim --mode decentralized --ticks 400 --layout office\n"
+            "  python -m swarm_sim --mode decentralized --comm-backend udp --udp-base-port 8700 --ticks 120 --layout office\n"
             "  python -m swarm_sim --mode decentralized --viz-substeps 6 --viz-frame-ms 16\n"
             "  python -m swarm_sim --mode decentralized --decentralized-policy local_sense --layout office\n"
             "  python run_sim.py --save-png preview.png --layout office\n"
@@ -726,6 +747,15 @@ def main() -> int:
     )
     parser.add_argument("--viz-comms-tail", type=int, default=18, help="Lines kept in RF telemetry tail.")
     parser.add_argument(
+        "--viz-mesh-activity-tail",
+        type=int,
+        default=36,
+        help=(
+            "Lines kept in Telemetry for app/mesh gossip ([APP] adopt + [MESH] broadcast). "
+            "0 disables that subsection."
+        ),
+    )
+    parser.add_argument(
         "--viz-substeps",
         type=int,
         default=2,
@@ -756,6 +786,21 @@ def main() -> int:
         action="store_true",
         help="Overlay ground-truth room IDs on the map (debug only).",
     )
+    parser.add_argument(
+        "--comm-backend",
+        choices=("inproc", "udp"),
+        default="udp",
+        help="Decentralized: RF path — "
+        "`udp` (default) multiprocess takeover sim via PropagationUDPTransmission (listen port = udp-base-port + uid); "
+        "`inproc` single-process RadioMedium fallback.",
+    )
+    parser.add_argument(
+        "--udp-base-port",
+        type=int,
+        default=8700,
+        metavar="PORT",
+        help="With --comm-backend udp: UDP listen port for drone UID i is PORT+i.",
+    )
     args = parser.parse_args()
 
     building = load_layout(args.layout)
@@ -768,8 +813,7 @@ def main() -> int:
             distance_exponent=args.n_exp,
             lf_per_wall_cell_db=args.wall_db,
         )
-        timeline_dec, trace_events = run_decentralized(
-            building,
+        dec_kwargs = dict(
             layout_name=args.layout,
             n_drones=args.n_drones,
             n_ticks=max(1, args.ticks),
@@ -779,7 +823,21 @@ def main() -> int:
             seed=int(args.seed),
             explorer_phase_ticks=(None if int(args.explorer_phase_ticks) <= 0 else int(args.explorer_phase_ticks)),
             decentralized_policy=str(args.decentralized_policy),
+            mesh_activity_tail_cap=max(0, int(getattr(args, "viz_mesh_activity_tail", 0))),
         )
+        if args.comm_backend == "udp":
+            from swarm_sim.sim_kernel_udp import run_decentralized_udp_mesh
+
+            timeline_dec, trace_events = run_decentralized_udp_mesh(
+                building,
+                udp_base_port=int(args.udp_base_port),
+                **dec_kwargs,
+            )
+        else:
+            timeline_dec, trace_events = run_decentralized(
+                building,
+                **dec_kwargs,
+            )
         if args.comms_log.strip():
             log_path = pathlib.Path(args.comms_log.strip())
             log_path.parent.mkdir(parents=True, exist_ok=True)
