@@ -228,10 +228,13 @@ export async function fetchLiveBundle(
 
   const body = JSON.stringify({
     floorplan,
-    ticks: opts.ticks ?? 1500,
-    nDrones: opts.nDrones ?? 7,
+    ticks: opts.ticks ?? 400,
+    nDrones: opts.nDrones ?? 5,
     seed: opts.seed ?? 0,
     explorerPhaseTicks: opts.explorerPhaseTicks ?? 25,
+    // Backend left to the server default (SIM_COMM_BACKEND, normally "udp").
+    // UDP startup failures now raise within ~15s (sim_kernel_udp handshake
+    // timeout) and _run_local_sense falls back to the in-process kernel.
     ...(opts.params ? { params: opts.params } : {}),
   });
 

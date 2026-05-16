@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "sim:export": "cd ../.. && python3 -m swarm_sim.export_sim swarm_sim/web/public/floorplans/default.json -o swarm_sim/web/public/sim/default.bundle.json --ticks 1500 --n-drones 7 --seed 0 --explorer-phase 25",
+    "sim:export": "cd ../.. && python3 -m swarm_sim.export_sim swarm_sim/web/public/floorplans/default.json -o swarm_sim/web/public/sim/default.bundle.json --ticks 400 --n-drones 5 --seed 0 --explorer-phase 25 --comm-backend udp",
     "smoke": "npx tsx scripts/smoke.ts",
     "prebuild": "npm run sim:export"
   },

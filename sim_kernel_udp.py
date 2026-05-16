@@ -162,42 +162,56 @@ def run_decentralized_udp_mesh(
         msg = q_from_child[int(uid)].get(timeout=timeout)
         return msg
 
-    for i in range(n_agents):
-        tag, u = recv_ok(i)
-        if tag != "HELLO":
-            raise RuntimeError(f"worker {i} expected HELLO got {tag!r}")
-
-    for i, (sr, sc) in enumerate(spawns):
-        q_to_child[i].put(("INIT", sr, sc, int(n_ticks), explorer_phase_ticks))
-    for i in range(n_agents):
-        tag, u = recv_ok(i)
-        if tag != "INIT_OK":
-            raise RuntimeError(f"worker {i} expected INIT_OK got {tag!r}")
-
-    # CommsOverlay TTL aligned with web exporter window so fresh links serialize correctly.
-    overlay = CommsOverlay(ttl_ticks=4)
-    log_buf: deque[str] = deque(maxlen=max(8, rf_log_cap))
-    all_events: list[CommEvent] = []
-    frames: list[DecentralizedFrame] = []
-
-    # Per-agent fog accumulator + global union for delta encoding the web fog mask.
-    known_per_uid: dict[int, set[tuple[int, int]]] = {i: set() for i in range(n_agents)}
-    prev_known_union: set[tuple[int, int]] = set()
-
-    target_witness: tuple[int, int, int, float] | None = None
-    neutralised_phase_ticks_left = 0
-    neutralised_done = False
-
-    def poses_int_registry() -> dict[int, tuple[int, int]]:
-        return {
-            i: (
-                int(round(float(pose_registry[str(i)][0]))),
-                int(round(float(pose_registry[str(i)][1]))),
+    def recv_handshake(uid: int, phase: str, timeout: float = 15.0) -> tuple:
+        # Short timeout + liveness probe so a worker that fails to import / bind its
+        # UDP port surfaces as a quick RuntimeError instead of a 120s queue.get hang.
+        # _run_local_sense catches the exception and falls back to the in-process kernel.
+        try:
+            return q_from_child[int(uid)].get(timeout=timeout)
+        except queue_std.Empty:
+            proc = procs[int(uid)]
+            raise RuntimeError(
+                f"UDP worker {uid} did not respond to {phase} within {timeout:.0f}s "
+                f"(alive={proc.is_alive()}, exitcode={proc.exitcode}, "
+                f"udp_port={udp_base_port + int(uid)})"
             )
-            for i in range(n_agents)
-        }
 
     try:
+        for i in range(n_agents):
+            tag, u = recv_handshake(i, "HELLO")
+            if tag != "HELLO":
+                raise RuntimeError(f"worker {i} expected HELLO got {tag!r}")
+
+        for i, (sr, sc) in enumerate(spawns):
+            q_to_child[i].put(("INIT", sr, sc, int(n_ticks), explorer_phase_ticks))
+        for i in range(n_agents):
+            tag, u = recv_handshake(i, "INIT_OK")
+            if tag != "INIT_OK":
+                raise RuntimeError(f"worker {i} expected INIT_OK got {tag!r}")
+
+        # CommsOverlay TTL aligned with web exporter window so fresh links serialize correctly.
+        overlay = CommsOverlay(ttl_ticks=4)
+        log_buf: deque[str] = deque(maxlen=max(8, rf_log_cap))
+        all_events: list[CommEvent] = []
+        frames: list[DecentralizedFrame] = []
+
+        # Per-agent fog accumulator + global union for delta encoding the web fog mask.
+        known_per_uid: dict[int, set[tuple[int, int]]] = {i: set() for i in range(n_agents)}
+        prev_known_union: set[tuple[int, int]] = set()
+
+        target_witness: tuple[int, int, int, float] | None = None
+        neutralised_phase_ticks_left = 0
+        neutralised_done = False
+
+        def poses_int_registry() -> dict[int, tuple[int, int]]:
+            return {
+                i: (
+                    int(round(float(pose_registry[str(i)][0]))),
+                    int(round(float(pose_registry[str(i)][1]))),
+                )
+                for i in range(n_agents)
+            }
+
         for tick in range(n_ticks):
             if neutralised_done:
                 break

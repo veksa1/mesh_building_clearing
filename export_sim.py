@@ -263,7 +263,8 @@ def _run_local_sense(
             return frames, events, "udp"
         except Exception as exc:  # noqa: BLE001 — record & fall back so exports stay reliable
             _log.warning(
-                "UDP mesh backend failed (%s); falling back to in-process kernel.", exc
+                "UDP mesh backend failed (%s: %s); falling back to in-process kernel.",
+                type(exc).__name__, exc, exc_info=True,
             )
     frames, events = run_decentralized(building, **common_kwargs)
     return frames, events, "inprocess"

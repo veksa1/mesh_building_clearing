@@ -25,6 +25,8 @@ from __future__ import annotations
 import logging
 import os
 import pathlib
+import signal
+import subprocess
 import sys
 import time
 import uuid
@@ -126,6 +128,53 @@ def require_token(creds: HTTPAuthorizationCredentials | None = Depends(_bearer))
         )
 
 
+def _sweep_orphan_workers() -> int:
+    """Reap drone-worker processes left over from a prior /export.
+
+    The UDP mesh kernel spawns one ``multiprocessing`` child per drone. If a
+    previous request hung (queue.get deadlock, killed before ``finally`` ran),
+    those children stay alive, keep their loopback UDP ports, and corrupt the
+    next request's mesh handshake. We SIGKILL anything that looks like a
+    ``multiprocessing.spawn`` child of this process, then reap it so the next
+    request starts clean. The resource_tracker is intentionally spared — it is
+    long-lived and shared by all future runs.
+    """
+    try:
+        out = subprocess.run(
+            ["pgrep", "-P", str(os.getpid())],
+            capture_output=True, text=True, timeout=2.0, check=False,
+        )
+    except Exception:
+        return 0
+    pids = [int(p) for p in out.stdout.split() if p.strip().isdigit()]
+    killed = 0
+    for pid in pids:
+        try:
+            ps = subprocess.run(
+                ["ps", "-p", str(pid), "-o", "command="],
+                capture_output=True, text=True, timeout=1.0, check=False,
+            )
+            cmd = ps.stdout.strip()
+            if "multiprocessing.spawn" not in cmd:
+                continue
+            if "resource_tracker" in cmd:
+                continue
+            os.kill(pid, signal.SIGKILL)
+            killed += 1
+        except (ProcessLookupError, PermissionError):
+            continue
+        except Exception:
+            continue
+    try:
+        while True:
+            reaped, _ = os.waitpid(-1, os.WNOHANG)
+            if reaped == 0:
+                break
+    except ChildProcessError:
+        pass
+    return killed
+
+
 def _merged_params(override: dict[str, float] | None) -> dict[str, float]:
     params = dict(DEFAULT_PARAMS)
     if override:
@@ -188,6 +237,10 @@ def export(req: ExportRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=f"ticks must be in 1..{_MAX_TICKS}")
     if req.nDrones <= 0 or req.nDrones > _MAX_DRONES:
         raise HTTPException(status_code=400, detail=f"nDrones must be in 1..{_MAX_DRONES}")
+
+    swept = _sweep_orphan_workers()
+    if swept:
+        logger.warning("swept %d orphan drone worker(s) before /export", swept)
 
     backend = (req.commBackend or _DEFAULT_BACKEND).strip().lower()
     if backend not in VALID_COMM_BACKENDS:
