@@ -10,6 +10,7 @@ class FloodingNode:
         self.node_id = node_id
         self.radio = radio
         self.max_delay = max_delay
+        self.heartbeat_delay = 3
 
         # --- STATE SYNCHRONIZATION ---
         self.current_state = "IDLE"
@@ -21,6 +22,7 @@ class FloodingNode:
         self.running = True
         threading.Thread(target=self._listen, daemon=True).start()
         threading.Thread(target=self._purge_routine, daemon=True).start()
+        threading.Thread(target=self._heartbeat_routine, daemon=True).start()
 
     def stop(self):
         self.running = False
@@ -97,4 +99,27 @@ class FloodingNode:
         if msg_id in self.pending_rebroadcasts:
             self.pending_rebroadcasts.remove(msg_id)
             print(f"[MESH] Rebroadcasting state '{packet['state']}' (TTL: {packet['ttl']})")
+            self.radio.broadcast(json.dumps(packet).encode('utf-8'))
+
+    def _heartbeat_routine(self):
+        """Periodically broadcasts current state to immediate neighbors to heal dropped packets."""
+        while self.running:
+            time.sleep(self.heartbeat_delay)
+
+            if self.state_version == 0.0:
+                continue
+
+            msg_id = str(uuid.uuid4())
+            packet = {
+                "type": "STATE_SYNC",
+                "msg_id": msg_id,
+                "origin": self.node_id,
+                "state": self.current_state,
+                "version": self.state_version,
+                "ttl": 1  # ttl 1 prevents heartbeat storms
+            }
+
+            self.seen_messages[msg_id] = time.time()
+
+            print(f"[HEARTBEAT] {self.node_id} pulsing state '{self.current_state}' (v{self.state_version})")
             self.radio.broadcast(json.dumps(packet).encode('utf-8'))
