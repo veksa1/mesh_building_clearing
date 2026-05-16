@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-background: #000000;
+  --color-foreground: #ffffff;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+html, body {
+  background: #000000;
+  color: #ffffff;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-mono);
+}
+
+.neutralised-overlay {
+  animation: neutralised-flash 2.4s ease-out forwards;
+}
+
+.neutralised-text {
+  animation: neutralised-text-pulse 2.4s ease-out forwards;
+}
+
+@keyframes neutralised-flash {
+  0% { background-color: rgba(255, 0, 32, 0.85); }
+  30% { background-color: rgba(255, 0, 32, 0.4); }
+  100% { background-color: rgba(0, 0, 0, 0); }
+}
+
+@keyframes neutralised-text-pulse {
+  0% { opacity: 0; transform: scale(0.8); }
+  20% { opacity: 1; transform: scale(1.05); }
+  60% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0.6; transform: scale(1); }
+}
+
+/* Style range input for the dark theme */
+input[type="range"] {
+  -webkit-appearance: none;
+  background: transparent;
+  height: 16px;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  background: rgba(255, 255, 255, 0.2);
+  height: 2px;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  margin-top: -7px;
+  background: #ffffff;
+  height: 16px;
+  width: 4px;
+  border-radius: 0;
+}
