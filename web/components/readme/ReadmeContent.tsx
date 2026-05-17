@@ -144,6 +144,78 @@ export function ReadmeContent() {
   return (
     <div>
       <section>
+        <h2 className={H2}>What It Does</h2>
+        <p className={P}>
+          A simulation of an autonomous indoor drone swarm clearing a
+          building and neutralising a target. N drones enter through an
+          entrance, spread out, share what they see over a radio mesh,
+          and converge on a target — with no central controller and no
+          shared clock beyond their own broadcasts.
+        </p>
+        <ol className="list-decimal pl-5 my-3 space-y-2 text-[12px] text-white/80 normal-case tracking-normal">
+          <li>
+            <span className="text-white">Setup.</span> The user draws a
+            floorplan (walls of selectable materials, doors), drops an
+            entrance and a target, and picks a fleet size N (1–32).
+          </li>
+          <li>
+            <span className="text-white">Roles.</span> The fleet
+            auto-splits into <em>1 scout</em> (highest UID) and{' '}
+            <em>N−1 relays</em>. The scout is the spearhead that opens
+            new rooms; relays stage along the backbone path between the
+            lobby and the active room so the radio chain stays alive
+            even when the scout pushes deep through walls.
+          </li>
+          <li>
+            <span className="text-white">Perception.</span> Each drone
+            runs two simulated sensors per tick. (a) A short-range
+            occupancy disc that reveals walls and floor cells within{' '}
+            <code className={CODE}>perception_radius</code>. (b) A
+            longer-range vision channel that detects doorways and the
+            target within <code className={CODE}>vision_radius</code>,
+            gated by Bresenham line-of-sight (no wall pixel may sit
+            between drone and detection). The vision channel stands in
+            for an onboard YOLO model — in a real deployment it would
+            be a CV head; here it&apos;s simulated as LOS-checked
+            geometric detection that produces the same kind of typed
+            <code className={CODE}>{' '}(kind, anchor, bearing, confidence, signature)</code>{' '}
+            records a vision model would emit.
+          </li>
+          <li>
+            <span className="text-white">Communication.</span> No
+            central controller. Drones gossip three packet kinds
+            (BEACON, TOPOLOGY_MERGE, TOKEN) over an RSSI-modeled radio
+            mesh; each receiver runs the full link budget (distance +
+            wall attenuation + sensitivity gate) locally and accepts a
+            frame only if it clears the gate. Merges are pure
+            set-unions, so any delivery order converges.
+          </li>
+          <li>
+            <span className="text-white">Decision policy.</span> The
+            active planner is BFS over the building&apos;s room
+            adjacency graph. From the entrance, every drone computes
+            the same spanning tree; the scout always advances toward
+            the anchor cell of the next unseen child room, while relays
+            distribute themselves by arc-length along the backbone
+            polyline to that room. Visited-room state is unioned
+            across the fleet via BEACONs, so every drone agrees on
+            what&apos;s left to clear.
+          </li>
+          <li>
+            <span className="text-white">Termination.</span> The first
+            drone whose vision channel detects the target broadcasts
+            the witness; the run enters a brief &quot;neutralised&quot;
+            dwell and ends.
+          </li>
+        </ol>
+        <p className={P}>
+          The rest of this document drills into the three challenge
+          layers — mesh, transmission, application — and the runtime
+          that hosts them.
+        </p>
+      </section>
+
+      <section>
         <h2 className={H2}>Mesh Layer</h2>
         <p className={P}>
           Communication between multiple autonomous agents. We use
