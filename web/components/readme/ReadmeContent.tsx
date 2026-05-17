@@ -188,7 +188,10 @@ export function ReadmeContent() {
             mesh; each receiver runs the full link budget (distance +
             wall attenuation + sensitivity gate) locally and accepts a
             frame only if it clears the gate. Merges are pure
-            set-unions, so any delivery order converges.
+            set-unions, so any delivery order converges. Under the
+            hood each drone is its own OS process broadcasting real
+            bytes on its own UDP port — only the transport changes
+            when the system moves to WiFi adapters.
           </li>
           <li>
             <span className="text-white">Decision policy.</span> The
