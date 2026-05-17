@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useReducer } from 'react';
+import { useEffect, useReducer, useState } from 'react';
 import type { AppAction, AppState } from '@/types';
 import { DEFAULT_SIM_PARAMS } from '@/constants';
 import { defaultFloorplan } from '@/lib/defaultFloorplan';
@@ -11,6 +11,7 @@ import { SimCanvas } from './simulation/SimCanvas';
 import { ControlPanel } from './simulation/ControlPanel';
 import { NeutralisedOverlay } from './simulation/NeutralisedOverlay';
 import { ThinkingPanel } from './simulation/ThinkingPanel';
+import { ReadmeModal } from './ReadmeModal';
 import { useAnimationLoop } from '@/hooks/useAnimationLoop';
 
 const initialState: AppState = {
@@ -114,6 +115,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
 
 export function SimApp() {
   const [state, dispatch] = useReducer(appReducer, initialState);
+  const [readmeOpen, setReadmeOpen] = useState(false);
 
   useEffect(() => {
     if (state.mode !== 'compiling') return;
@@ -195,6 +197,15 @@ export function SimApp() {
           </div>
         </aside>
       )}
+
+      <button
+        type="button"
+        onClick={() => setReadmeOpen(true)}
+        className="fixed top-4 right-4 z-40 border border-white/40 bg-black px-3 py-1.5 text-[11px] uppercase tracking-widest text-white/70 hover:border-white hover:text-white"
+      >
+        README.md
+      </button>
+      <ReadmeModal open={readmeOpen} onClose={() => setReadmeOpen(false)} />
     </div>
   );
 }
