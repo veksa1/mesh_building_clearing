@@ -207,8 +207,7 @@ export function ReadmeContent() {
           <li>
             <span className="text-white">Termination.</span> The first
             drone whose vision channel detects the target broadcasts
-            the witness; the run enters a brief &quot;neutralised&quot;
-            dwell and ends.
+            the witness.
           </li>
         </ol>
         <p className={P}>
