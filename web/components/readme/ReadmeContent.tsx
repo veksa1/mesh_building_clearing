@@ -147,7 +147,7 @@ export function ReadmeContent() {
         <h2 className={H2}>What It Does</h2>
         <p className={P}>
           A simulation of an autonomous indoor drone swarm clearing a
-          building and neutralising a target. N drones enter through an
+          building and finding a target. N drones enter through an
           entrance, spread out, share what they see over a radio mesh,
           and converge on a target — with no central controller and no
           shared clock beyond their own broadcasts.
